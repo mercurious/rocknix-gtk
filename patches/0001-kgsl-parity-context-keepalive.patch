@@ -1,0 +1,51 @@
+--- a/drivers/gpu/drm/msm/msm_gpu.c	2026-07-05 17:21:14
++++ b/drivers/gpu/drm/msm/msm_gpu.c	2026-07-05 17:21:41
+@@ -19,6 +19,23 @@
+ #include <linux/sched/task.h>
+ 
+ /*
++ * ROCKNIX-GTK / KGSL parity (ETK mission #1):
++ *
++ * When set, a GPU hang recovered by hangcheck is treated the way KGSL
++ * (Android's downstream driver) treats it on this same silicon -- "reset,
++ * skip, continue" -- instead of msm's default "reset, ban, punish". The
++ * default (false) preserves stock msm behaviour exactly, so a kernel carrying
++ * this patch boots byte-behaviour-identical to stock until the param is
++ * flipped. Writable at runtime via /sys/module/msm/parameters/context_keepalive
++ * for no-reboot A/B; bake msm.context_keepalive=1 into the grub cmdline once a
++ * build is validated. See recover_worker().
++ */
++static bool context_keepalive = false;
++module_param(context_keepalive, bool, 0644);
++MODULE_PARM_DESC(context_keepalive,
++	"KGSL parity: keep a hung VM_BIND context usable after hangcheck recovery (default off = stock msm ban)");
++
++/*
+  * Power Management:
+  */
+ 
+@@ -490,7 +507,23 @@
+ 	task = get_pid_task(submit->pid, PIDTYPE_PID);
+ 	if (!task)
+ 		gpu->global_faults++;
+-	else {
++	else if (context_keepalive) {
++		/*
++		 * KGSL parity: survive the hang. Skip BOTH the VM-unusable ban
++		 * (which -EPIPEs every future submit on this context, see
++		 * msm_gem_submit.c) AND the vm->faults bump that Turnip polls via
++		 * MSM_PARAM_FAULTS to declare VK_ERROR_DEVICE_LOST -- either one
++		 * alone would still kill the context. The GPU is still reset and
++		 * surviving work replayed below; the guilty submit is retired with
++		 * its fence signalled completed, so userspace pollers unpark. The
++		 * hang becomes a brief mid-race stutter instead of a lost device.
++		 * (submit->queue->faults is still bumped above as an honest stat;
++		 * it does not feed MSM_PARAM_FAULTS or any ban.)
++		 */
++		DRM_DEV_INFO(dev->dev,
++			"%s: context_keepalive: surviving hang, context kept usable\n",
++			gpu->name);
++	} else {
+ 		struct msm_gem_vm *vm = to_msm_vm(submit->vm);
+ 
+ 		vm->faults++;

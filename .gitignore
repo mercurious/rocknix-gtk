@@ -1,0 +1,23 @@
+# Heavy build workspace — NOT part of the published record.
+# Regenerate everything from BUILDING.md; none of this is ours to redistribute.
+
+# Built kernel Images (60 MB+ each)
+artifacts/
+# Shallow ROCKNIX/distribution clone (upstream; fetch your own)
+distribution/
+# Rig-pulled config + stock KERNEL + PROPRIETARY Qualcomm firmware blobs
+groundtruth/
+# Upstream kernel msm driver, pulled for study (not ours)
+msm-src/
+# Mesa Turnip source, pulled for study (lives in etk-turnip-gtk)
+turnip-src/
+# Derived build staging (assembled patches + firmware + dts + initramfs)
+staging/
+# Superseded by scripts/ (kept locally as the working copy)
+tools/
+# Local notes draft (folded into the tracked docs)
+RECIPE.md
+*.o
+*.log
+.DS_Store
+._*
