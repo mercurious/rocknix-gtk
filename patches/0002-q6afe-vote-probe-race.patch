@@ -1,0 +1,84 @@
+--- a/sound/soc/qcom/qdsp6/q6afe.c
++++ b/sound/soc/qcom/qdsp6/q6afe.c
+@@ -987,6 +987,24 @@
+ 				afe->result = *res;
+ 				wake_up(&afe->wait);
+ 			}
++			break;
++		case AFE_CMD_REMOTE_LPASS_CORE_HW_VOTE_REQUEST:
++			/*
++			 * ROCKNIX-GTK / SM8250 audio probe race (ETK):
++			 * an ADSP error reply to a HW-block vote arrives as a
++			 * basic rsp carrying the CMD opcode (seen live at
++			 * boot: error 0x16 while the audio_pd protection
++			 * domain is still settling). Stock code fell through
++			 * to "Unknown cmd" and never woke the waiter, so a
++			 * fast rejection became a 3s wait_event timeout.
++			 * Complete the waiter with the RSP opcode it waits
++			 * for; the error status is handled (and retried) by
++			 * q6afe_vote_lpass_core_hw().
++			 */
++			afe->result.opcode =
++				AFE_CMD_RSP_REMOTE_LPASS_CORE_HW_VOTE_REQUEST;
++			afe->result.status = res->status;
++			wake_up(&afe->wait);
+ 			break;
+ 		default:
+ 			dev_err(afe->dev, "Unknown cmd 0x%x\n",	res->opcode);
+@@ -1865,6 +1883,8 @@
+ 	struct q6afe *afe = dev_get_drvdata(dev->parent);
+ 	struct afe_cmd_remote_lpass_core_hw_vote_request *vote_cfg;
+ 	struct apr_pkt *pkt;
++	unsigned long deadline;
++	int retries = 0;
+ 	int ret = 0;
+ 	int pkt_size = APR_HDR_SIZE + sizeof(*vote_cfg);
+ 
+@@ -1887,12 +1907,42 @@
+ 	strscpy(vote_cfg->client_name, client_name,
+ 			sizeof(vote_cfg->client_name));
+ 
+-	ret = afe_apr_send_pkt(afe, pkt, NULL,
+-			       AFE_CMD_RSP_REMOTE_LPASS_CORE_HW_VOTE_REQUEST);
+-	if (ret)
+-		dev_err(afe->dev, "AFE failed to vote (%d)\n", hw_block_id);
++	/*
++	 * ROCKNIX-GTK / SM8250 audio probe race (ETK):
++	 * on a fraction of cold boots (~1 in 4 observed) the ADSP rejects the
++	 * first vote -- the audio_pd protection domain is not actually ready
++	 * yet despite the PDR up indication. Stock code hard-failed here,
++	 * which hard-fails the va_macro probe (-ETIMEDOUT / -EINVAL, not
++	 * -EPROBE_DEFER), so the driver core never retries and the entire
++	 * LPASS chain (macros -> soundwire -> wcd938x -> sound card) parks in
++	 * deferred-probe forever: a fully silent boot with zero ALSA cards.
++	 * Field data (ETK userspace audio watchdog, 2026-07): a re-poke of the
++	 * chain a few seconds later ALWAYS succeeds. Retry the vote in place
++	 * instead, bounded to ~15s wall time. This is probe/clk-prepare
++	 * context, so sleeping is legal; a healthy boot's first vote succeeds
++	 * and never enters the retry path.
++	 */
++	deadline = jiffies + msecs_to_jiffies(15000);
++	for (;;) {
++		ret = afe_apr_send_pkt(afe, pkt, NULL,
++				AFE_CMD_RSP_REMOTE_LPASS_CORE_HW_VOTE_REQUEST);
++		if (!ret)
++			break;
++		if (time_after(jiffies, deadline)) {
++			dev_err(afe->dev, "AFE failed to vote (%d)\n",
++				hw_block_id);
++			return ret;
++		}
++		retries++;
++		msleep(250);
++	}
+ 
+-	return ret;
++	if (retries)
++		dev_info(afe->dev,
++			 "etk: AFE vote (%d) recovered after %d retries\n",
++			 hw_block_id, retries);
++
++	return 0;
+ }
+ EXPORT_SYMBOL(q6afe_vote_lpass_core_hw);
+ 

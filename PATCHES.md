@@ -36,3 +36,37 @@ Each is kernel-image-only and preserves the module ABI (`uname -r` = `7.0.11`, u
   emulator-side fence force-signal (not yet shipped). See `VALIDATION.md`.
 - **Upstreamability:** the param is opt-in and default-off; the intent is a clean
   `msm`-side proposal (count-recoveries / opt-in survivable-context), disclosed as AI-assisted.
+
+### Patch #2 — `q6afe-vote-probe-race`: cure the SM8250 silent-boot audio coin flip
+- **File:** `sound/soc/qcom/qdsp6/q6afe.c` (`patches/0002-...`).
+- **The problem it solves:** on a fraction of cold boots (~1 in 4 observed on the Retroid Pocket
+  Flip 2) the entire boot is silent — zero ALSA cards, PipeWire serves only "Dummy Output", every
+  app plays into the void. Root cause is **two stacked kernel bugs** in the LPASS core-HW clock
+  vote that the `va_macro` probe depends on:
+  1. When the ADSP rejects `AFE_CMD_REMOTE_LPASS_CORE_HW_VOTE_REQUEST` (seen live: error `0x16`
+     while the `audio_pd` protection domain is still settling, ~10ms after its PDR "up"
+     indication), the error reply arrives as an `APR_BASIC_RSP_RESULT` carrying the CMD opcode.
+     `q6afe_callback()` has no case for it → "Unknown cmd 0x100f4" → **the vote waiter is never
+     woken** and a fast rejection becomes a 3s `wait_event` timeout.
+  2. The resulting `-ETIMEDOUT` hard-fails the `va_macro` probe (`probe with driver va_macro
+     failed with error -110`). A hard failure — unlike `-EPROBE_DEFER` — is **never retried** by
+     the driver core, so the whole chain (macros → soundwire → wcd938x → sound card) parks in
+     `/sys/kernel/debug/devices_deferred` forever. `va_macro` is the clock supplier for ALL LPASS
+     macros; one lost race kills audio for the entire boot.
+- **What it does:** (a) completes the vote waiter from the basic-rsp error path, so a rejection
+  fails in milliseconds instead of 3s; (b) retries the vote in place (250ms period, bounded at
+  ~15s wall time) until the ADSP accepts it. Probe/clk-prepare context, so sleeping is legal. A
+  healthy boot's first vote succeeds and never enters either path — there is no knob because the
+  no-retry behaviour is simply a bug (it ends in guaranteed dead audio). A kernel-side recovery
+  announces itself in dmesg: `etk: AFE vote (N) recovered after N retries`.
+- **Field evidence for the retry approach:** ETK's userspace watchdog (now deprecated to a
+  validation tripwire) proved for a week that re-poking the deferred chain a few seconds after a
+  lost race **always** succeeds — the ADSP just needs moments more. The patch moves that exact
+  remedy to the point of failure, before anything downstream can park.
+- **Verdict (honest):** root cause fully decoded from live dmesg + source; fix builds clean and
+  boots pending; natural-race validation needs cold-boot mileage (~1-in-4 occurrence). The
+  deprecated watchdog logs every kernel-fix engagement to the ETK tripwire, so each raced boot is
+  a validation datapoint.
+- **Upstreamability:** both halves are straightforward bugfixes (dropped wakeup + probe-race
+  retry) with no behaviour change on healthy paths; candidate for a real upstream submission,
+  disclosed as AI-assisted.
