@@ -1,7 +1,7 @@
-# ETK ROCKNIX-GTK — kernel fork (Linux 7.0.11, SM8250 / Adreno 650)
+# ETK ROCKNIX-GTK — kernel fork (Linux 7.1.2, SM8250 / Adreno 650)
 
 A small, focused downstream patch set on top of the **ROCKNIX** kernel (mainline Linux
-`7.0.11` + ROCKNIX's SM8250 device patch stack), built for the Snapdragon 865 / Adreno 650
+`7.1.2` + ROCKNIX's SM8250 device patch stack), built for the Snapdragon 865 / Adreno 650
 class (Retroid Pocket Flip 2) and tuned against PS3 emulation workloads (RPCS3).
 
 This repository exists to **publish the source delta and reproduce the build** — it is a
@@ -15,9 +15,9 @@ image.
 ## Lineage (downstream patch series)
 
 > **Downstream of the ROCKNIX kernel.**
-> Base: mainline **`linux-7.0.11`** (kernel.org) + ROCKNIX's SM8250 device patch stack, exactly
+> Base: mainline **`linux-7.1.2`** (kernel.org) + ROCKNIX's SM8250 device patch stack, exactly
 > as pinned by [`ROCKNIX/distribution`](https://github.com/ROCKNIX/distribution) for release
-> `20260701`. Upstream is the canonical source; this is a discrete patch series carried on top.
+> `20260801`. Upstream is the canonical source; this is a discrete patch series carried on top.
 > Target: `arm64`, `CONFIG_DRM_MSM` (a6xx / KGSL-less `msm` KMS driver), glibc/ROCKNIX userspace.
 
 This is not a GitHub fork-network fork — it declares its lineage here and carries its changes as
@@ -46,9 +46,9 @@ in. Honest validation status — including where it does and doesn't help — is
 
 ## The module-ABI law (why `uname` stays stock)
 
-ROCKNIX's `/lib/modules/7.0.11` ships as prebuilt `.ko`s next to a read-only squashfs. These
+ROCKNIX's `/lib/modules/7.1.2` ships as prebuilt `.ko`s next to a read-only squashfs. These
 patches are **kernel-image-only** and keep the exact version string + localversion
-(`7.0.11`, no `+g<hash>` — build from the **release tarball, never a git checkout**, or
+(`7.1.2`, no `+g<hash>` — build from the **release tarball, never a git checkout**, or
 `CONFIG_LOCALVERSION_AUTO=y` poisons the release string and the stock modules stop loading).
 Any change that would shift module ABI belongs in an image-repack lane, not here.
 

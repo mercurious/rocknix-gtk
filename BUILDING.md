@@ -1,6 +1,6 @@
 # Building the ETK ROCKNIX-GTK kernel
 
-Reproduces the ROCKNIX `20260701` SM8250 kernel (`7.0.11`) from upstream sources + the ROCKNIX
+Reproduces the ROCKNIX `20260801` SM8250 kernel (`7.1.2`) from upstream sources + the ROCKNIX
 patch stack + this fork's patches, on an arm64 host (native, or a colima/Docker aarch64
 container so the cross-build runs at native speed). No full distro build is needed — this
 builds only the kernel image, then it overlays via ETK.
@@ -16,10 +16,10 @@ byte size. The kernel is boot-sensitive to the toolchain; don't fight it. (Debia
 
 ## 1. Reconstruct the base tree
 
-From [`ROCKNIX/distribution`](https://github.com/ROCKNIX/distribution) at tag `20260701`,
+From [`ROCKNIX/distribution`](https://github.com/ROCKNIX/distribution) at tag `20260801`,
 `projects/ROCKNIX/packages/linux/package.mk` selects, for `DEVICE=SM8250`:
 
-- **Source:** mainline `https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.0.11.tar.xz`
+- **Source:** mainline `https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.1.2.tar.xz`
   (sha256 `e56c8356dda01136a6041c6ef832bd0ec99bd2d35dff97832aa5ec10ed014304`).
   **Tarball, never a git checkout** — the config has `CONFIG_LOCALVERSION_AUTO=y`.
 - **Patch stack (34), in `scripts/unpack` order:**
@@ -61,7 +61,7 @@ the stock image embeds.
 stack → config → `olddefconfig` + drift check → build). Core invocation:
 
 ```
-make -C linux-7.0.11 O=out ARCH=arm64 CC=gcc HOSTCC=gcc KBUILD_BUILD_HOST=rocknix-gtk -j6 Image modules
+make -C linux-7.1.2 O=out ARCH=arm64 CC=gcc HOSTCC=gcc KBUILD_BUILD_HOST=rocknix-gtk -j6 Image modules
 ```
 
 Expect ~15–25 min cold, minutes warm (keep `O=out` for incremental — a one-file patch relinks
@@ -69,9 +69,9 @@ in ~2 min). `KERNEL_TARGET=Image` (uncompressed, ~60 MB with initramfs + firmwar
 
 ## 6. Verify before you trust it
 
-- `cat out/include/config/kernel.release` = `7.0.11` exactly.
+- `cat out/include/config/kernel.release` = `7.1.2` exactly.
 - Module vermagic (`modinfo -F vermagic out/.../snd-aloop.ko`) matches a live rig module
-  (`7.0.11 SMP preempt mod_unload aarch64`).
+  (`7.1.2 SMP preempt mod_unload aarch64`).
 - 236 `.ko` built (matches the rig).
 - Re-extract the initramfs from your built `Image` and `cmp` it against the carved cpio —
   byte-identical.

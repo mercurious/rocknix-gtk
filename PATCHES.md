@@ -1,7 +1,7 @@
 # Patch series
 
-Discrete patches over the reconstructed ROCKNIX `7.0.11` SM8250 tree (see `BUILDING.md`).
-Each is kernel-image-only and preserves the module ABI (`uname -r` = `7.0.11`, unchanged).
+Discrete patches over the reconstructed ROCKNIX `7.1.2` SM8250 tree (see `BUILDING.md`).
+Each is kernel-image-only and preserves the module ABI (`uname -r` = `7.1.2`, unchanged).
 
 ### Patch #1 — `kgsl-parity`: keep a hung VM_BIND context alive (`msm.context_keepalive`)
 - **File:** `drivers/gpu/drm/msm/msm_gpu.c` (`patches/0001-...`).

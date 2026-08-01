@@ -48,3 +48,16 @@ Two findings from a full 2026-07-05 session worth recording:
 Fallback is never more than a reboot away: the custom kernel is staged under a TEST grub entry
 (default entry = stock). Below that: VolDown fastboot → reflash the official image. Games, shader
 vault, and telemetry survive all of it (they live on the storage partition, not the kernel).
+
+## 20260801 lane — `KERNEL.rocknix-gtk-20260801-0.3` (2026-08-01)
+- §4.4 cold-boot gate PASSED on the reference rig (Retroid Pocket Flip 2, ROCKNIX official
+  20260801): `uname -a` = `7.1.2 #1 SMP PREEMPT`, builder host `rocknix-gtk`,
+  `msm.context_keepalive=1` armed (`/sys/module/msm/parameters/context_keepalive` = `Y`),
+  29 modules loaded (= stock baseline), audio card present at boot (q6afe patch riding as a
+  tripwire — zero retries needed), zero failed units, ETK drift tool verdict:
+  **no structural drift — safe to adopt**.
+- Field: `context_keepalive` absorbed two live GPU hangs on this kernel the same day
+  (00E5-class fence faults on GT HD, "context kept usable", races finished) — the anti-lock
+  net is proven on 7.1.2.
+- Both ETK patches applied with zero fuzz — neither `msm_gpu.c` nor `q6afe.c` hunk sites
+  drifted across mainline 7.0.11 → 7.1.2.

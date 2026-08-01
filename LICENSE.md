@@ -5,7 +5,7 @@ This is a **downstream patch series for the Linux kernel** as packaged by
 source unchanged: **GNU General Public License, version 2** (`GPL-2.0`), matching both the Linux
 kernel and ROCKNIX.
 
-- **Base:** mainline `linux-7.0.11` (kernel.org) + ROCKNIX's SM8250 patch stack. Upstream is the
+- **Base:** mainline `linux-7.1.2` (kernel.org; earlier releases: `linux-7.0.11`) + ROCKNIX's SM8250 patch stack. Upstream is the
   canonical source; the patches in [`patches/`](patches) are the delta.
 - **The patches** in this repository are offered under the same `GPL-2.0` terms as the code they
   modify.
