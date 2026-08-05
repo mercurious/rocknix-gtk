@@ -14,13 +14,30 @@ binutils-2.46 build of the identical tree boots first try and lands at the exact
 byte size. The kernel is boot-sensitive to the toolchain; don't fight it. (Debian `sid`'s
 `build-essential` satisfies this; Ubuntu `noble`'s GCC-14 does not.)
 
+**Pin the compiler explicitly — `sid` moves.** As of 2026-08-05 sid's default `gcc` is
+**16.1.0** (binutils 2.47), while every validated artifact to date was built with
+**GCC 15.3.0 / binutils 2.46.50**. GCC 16 is untested here, and the failure mode above is
+silent (clean build, clean verification, black screen), so do not let a container's default
+compiler decide. Install `gcc-15` alongside and pass it in:
+
+```
+apt-get install -y build-essential gcc-15   # sid keeps 15.x available next to the default
+make -C linux-7.1.2 O=out ARCH=arm64 CC=gcc-15 HOSTCC=gcc-15 ...
+```
+
+A kernel built with any other toolchain combination is unvalidated by definition and must
+clear the §7 cold-boot gate before it is trusted — no exceptions, however clean the verify.
+
 ## 1. Reconstruct the base tree
 
 From [`ROCKNIX/distribution`](https://github.com/ROCKNIX/distribution) at tag `20260801`,
 `projects/ROCKNIX/packages/linux/package.mk` selects, for `DEVICE=SM8250`:
 
 - **Source:** mainline `https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.1.2.tar.xz`
-  (sha256 `e56c8356dda01136a6041c6ef832bd0ec99bd2d35dff97832aa5ec10ed014304`).
+  (sha256 `37198c93727be247c9fb5309bb86cd5e496c61e5322cd8c4eca9476bb0b5883f`, 158,323,320
+  bytes — corrected 2026-08-05: verified identical between the staging tarball that built the
+  shipping `-0.3` artifact and a fresh cdn.kernel.org fetch. The value recorded here
+  previously (`e56c8356…`) matched neither and would have failed a legitimate source.)
   **Tarball, never a git checkout** — the config has `CONFIG_LOCALVERSION_AUTO=y`.
 - **Patch stack (34), in `scripts/unpack` order:**
   1. `projects/ROCKNIX/packages/linux/patches/mainline/` (5)

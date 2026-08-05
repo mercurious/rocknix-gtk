@@ -11,7 +11,12 @@ die() { echo "[build_stock] FATAL: $*"; exit 1; }
 
 SRC=/kernel/linux-7.0.11
 OUT="${OUT:-/kernel/out}"
-KCC="${KCC:-gcc-14}"
+# gcc-15 is the VALIDATED compiler (15.3.0 built every shipping artifact). Do not
+# default to gcc-14: it produces a kernel that compiles clean, verifies clean, and
+# black-screens the rig pre-userspace (BUILDING.md "Toolchain law"). Do not default
+# to the container's bare `gcc` either — sid's default moved to 16.1.0 on 2026-08-05
+# and is unvalidated here. Override deliberately or not at all.
+KCC="${KCC:-gcc-15}"
 
 # --- 1. Extract pristine tarball (tarball, NEVER git: LOCALVERSION_AUTO=y
 #        would append +g<hash> and break the module-ABI law) ---
