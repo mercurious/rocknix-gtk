@@ -13,7 +13,25 @@ die() { echo "[build_712] FATAL: $*"; exit 1; }
 
 SRC=/kernel/linux-7.1.2
 OUT="${OUT:-/kernel/out712}"
-KCC="${KCC:-gcc}"
+
+# gcc-15 is the VALIDATED compiler (15.3.0 built every shipping artifact). Do not
+# default to gcc-14: it produces a kernel that compiles clean, verifies clean, and
+# black-screens the rig pre-userspace (BUILDING.md "Toolchain law"). Do not default
+# to the container's bare `gcc` either — sid's default moved to 16.1.0 on 2026-08-05
+# and is unvalidated here. Override deliberately or not at all.
+KCC_EXPLICIT="${KCC:+yes}"
+KCC="${KCC:-gcc-15}"
+
+# The law above is stated in this file's header and in build_stock.sh, but until
+# now nothing enforced it — and the failure is SILENT (clean build, clean verify,
+# black screen). Gate the DEFAULT path; an explicit KCC is the operator's call.
+if [ -z "$KCC_EXPLICIT" ]; then
+  KCC_VER="$($KCC -dumpfullversion 2>/dev/null || echo none)"
+  case "$KCC_VER" in
+    15.*) ;;
+    *) die "default compiler $KCC is $KCC_VER, not the validated 15.x. Install gcc-15 in the container, or set KCC=... deliberately." ;;
+  esac
+fi
 
 # --- 1. Extract pristine tarball (tarball, NEVER git: LOCALVERSION_AUTO=y
 #        would append +g<hash> and break the module-ABI law) ---
