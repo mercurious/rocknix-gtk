@@ -1,0 +1,220 @@
+--- a/sound/soc/qcom/qdsp6/q6asm.c
++++ b/sound/soc/qcom/qdsp6/q6asm.c
+@@ -40,6 +40,7 @@
+ #define ASM_PARAM_ID_ENCDEC_ENC_CFG_BLK_V2	0x00010DA3
+ #define ASM_SESSION_CMD_RUN_V2			0x00010DAA
+ #define ASM_MEDIA_FMT_MULTI_CHANNEL_PCM_V2	0x00010DA5
++#define ASM_MEDIA_FMT_MULTI_CHANNEL_PCM_V3	0x00010DDC
+ #define ASM_MEDIA_FMT_MP3			0x00010BE9
+ #define ASM_MEDIA_FMT_FLAC			0x00010C16
+ #define ASM_MEDIA_FMT_WMA_V9			0x00010DA8
+@@ -96,6 +97,26 @@
+ 	u32 sample_rate;
+ 	u16 is_signed;
+ 	u16 reserved;
++	u8 channel_mapping[PCM_MAX_NUM_CHANNEL];
++} __packed;
++
++/*
++ * ROCKNIX-GTK / 24-bit sample-justification fix (ETK):
++ * the V2 block above has no way to say how a 24-bit sample sits in its
++ * container, and ALSA S24_LE is 24 valid bits in a 32-bit word. The DSP's
++ * guess costs ~25dB on the DISPLAY_PORT_RX path on SM8250 (metered live,
++ * WlMirrorTeardown_20260807 tone matrix; S16 on the same port reaches the
++ * clipping roof). V3 replaces `reserved` with `sample_word_size` (12/24/32,
++ * same wire size, rides the same MEDIA_FMT_UPDATE_V2 command) -- the
++ * downstream-standard way to disambiguate 24-in-32.
++ */
++struct asm_multi_channel_pcm_fmt_blk_v3 {
++	struct asm_data_cmd_media_fmt_update_v2 fmt_blk;
++	u16 num_channels;
++	u16 bits_per_sample;
++	u32 sample_rate;
++	u16 is_signed;
++	u16 sample_word_size;
+ 	u8 channel_mapping[PCM_MAX_NUM_CHANNEL];
+ } __packed;
+ 
+@@ -917,13 +938,15 @@
+  * @format: audio sample format
+  * @codec_profile: compressed format profile
+  * @bits_per_sample: bits per sample
++ * @sample_word_size: container word size in bits (0 = same as bits_per_sample)
+  * @is_gapless: flag to indicate if this is a gapless stream
+  *
+  * Return: Will be an negative value on error or zero on success
+  */
+ int q6asm_open_write(struct audio_client *ac, uint32_t stream_id,
+ 		     uint32_t format, u32 codec_profile,
+-		     uint16_t bits_per_sample, bool is_gapless)
++		     uint16_t bits_per_sample, uint16_t sample_word_size,
++		     bool is_gapless)
+ {
+ 	struct asm_stream_cmd_open_write_v3 *open;
+ 	struct apr_pkt *pkt;
+@@ -953,7 +976,16 @@
+ 		open->dec_fmt_id = ASM_MEDIA_FMT_MP3;
+ 		break;
+ 	case FORMAT_LINEAR_PCM:
+-		open->dec_fmt_id = ASM_MEDIA_FMT_MULTI_CHANNEL_PCM_V2;
++		/*
++		 * ROCKNIX-GTK (ETK): open V3 for 24-in-32 (ALSA S24_LE) so
++		 * the media-format block can carry sample_word_size -- see
++		 * asm_multi_channel_pcm_fmt_blk_v3. 16-bit and packed paths
++		 * stay V2, wire-identical to stock.
++		 */
++		if (bits_per_sample == 24 && sample_word_size == 32)
++			open->dec_fmt_id = ASM_MEDIA_FMT_MULTI_CHANNEL_PCM_V3;
++		else
++			open->dec_fmt_id = ASM_MEDIA_FMT_MULTI_CHANNEL_PCM_V2;
+ 		break;
+ 	case SND_AUDIOCODEC_FLAC:
+ 		open->dec_fmt_id = ASM_MEDIA_FMT_FLAC;
+@@ -1083,13 +1115,59 @@
+ 					  uint32_t stream_id,
+ 					  uint32_t rate, uint32_t channels,
+ 					  u8 channel_map[PCM_MAX_NUM_CHANNEL],
+-					  uint16_t bits_per_sample)
++					  uint16_t bits_per_sample,
++					  uint16_t sample_word_size)
+ {
+ 	struct asm_multi_channel_pcm_fmt_blk_v2 *fmt;
+ 	struct apr_pkt *pkt;
+ 	u8 *channel_mapping;
+ 	int pkt_size = APR_HDR_SIZE + sizeof(*fmt);
++
++	/*
++	 * ROCKNIX-GTK (ETK): a stream opened as MULTI_CHANNEL_PCM_V3 (see
++	 * q6asm_open_write) must be given the V3 block, which carries the
++	 * container word size the V2 block cannot express. Same gate as the
++	 * open so the two can never disagree; the V2 path below is
++	 * wire-identical to stock for everything else.
++	 */
++	if (bits_per_sample == 24 && sample_word_size == 32) {
++		struct asm_multi_channel_pcm_fmt_blk_v3 *fmt3;
++		int pkt3_size = APR_HDR_SIZE + sizeof(*fmt3);
+ 
++		void *p3 __free(kfree) = kzalloc(pkt3_size, GFP_KERNEL);
++		if (!p3)
++			return -ENOMEM;
++
++		pkt = p3;
++		fmt3 = p3 + APR_HDR_SIZE;
++
++		q6asm_add_hdr(ac, &pkt->hdr, pkt3_size, true, stream_id);
++
++		pkt->hdr.opcode = ASM_DATA_CMD_MEDIA_FMT_UPDATE_V2;
++		fmt3->fmt_blk.fmt_blk_size =
++			sizeof(*fmt3) - sizeof(fmt3->fmt_blk);
++		fmt3->num_channels = channels;
++		fmt3->bits_per_sample = bits_per_sample;
++		fmt3->sample_rate = rate;
++		fmt3->is_signed = 1;
++		fmt3->sample_word_size = sample_word_size;
++
++		channel_mapping = fmt3->channel_mapping;
++
++		if (channel_map) {
++			memcpy(channel_mapping, channel_map,
++			       PCM_MAX_NUM_CHANNEL);
++		} else {
++			if (q6dsp_map_channels(channel_mapping, channels)) {
++				dev_err(ac->dev, " map channels failed %d\n",
++					channels);
++				return -EINVAL;
++			}
++		}
++
++		return q6asm_ac_send_cmd_sync(ac, pkt);
++	}
++
+ 	void *p __free(kfree) = kzalloc(pkt_size, GFP_KERNEL);
+ 	if (!p)
+ 		return -ENOMEM;
+--- a/sound/soc/qcom/qdsp6/q6asm.h
++++ b/sound/soc/qcom/qdsp6/q6asm.h
+@@ -99,7 +99,8 @@
+ 		      uint32_t msw_ts, uint32_t lsw_ts, uint32_t wflags);
+ int q6asm_open_write(struct audio_client *ac, uint32_t stream_id,
+ 		     uint32_t format, u32 codec_profile,
+-		     uint16_t bits_per_sample, bool is_gapless);
++		     uint16_t bits_per_sample, uint16_t sample_word_size,
++		     bool is_gapless);
+ 
+ int q6asm_open_read(struct audio_client *ac, uint32_t stream_id,
+ 		    uint32_t format, uint16_t bits_per_sample);
+@@ -114,7 +115,8 @@
+ 					  uint32_t stream_id,
+ 					  uint32_t rate, uint32_t channels,
+ 					  u8 channel_map[PCM_MAX_NUM_CHANNEL],
+-					  uint16_t bits_per_sample);
++					  uint16_t bits_per_sample,
++					  uint16_t sample_word_size);
+ int q6asm_stream_media_format_block_flac(struct audio_client *ac,
+ 					 uint32_t stream_id,
+ 					 struct q6asm_flac_cfg *cfg);
+--- a/sound/soc/qcom/qdsp6/q6asm-dai.c
++++ b/sound/soc/qcom/qdsp6/q6asm-dai.c
+@@ -63,6 +63,13 @@
+ 	uint64_t bytes_received;
+ 	uint64_t copied_total;
+ 	uint16_t bits_per_sample;
++	/*
++	 * ROCKNIX-GTK (ETK): container word size in bits for linear PCM --
++	 * 32 for ALSA S24_LE (24 valid bits, LSB-justified in a 32-bit
++	 * word). Lets q6asm tell the DSP how 24-bit samples are packed;
++	 * see asm_multi_channel_pcm_fmt_blk_v3 in q6asm.c.
++	 */
++	uint16_t sample_word_size;
+ 	snd_pcm_uframes_t queue_ptr;
+ 	uint16_t source; /* Encoding source bit mask */
+ 	struct audio_client *audio_client;
+@@ -257,7 +264,8 @@
+ 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+ 		ret = q6asm_open_write(prtd->audio_client, prtd->stream_id,
+ 				       FORMAT_LINEAR_PCM,
+-				       0, prtd->bits_per_sample, false);
++				       0, prtd->bits_per_sample,
++				       prtd->sample_word_size, false);
+ 	} else if (substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
+ 		ret = q6asm_open_read(prtd->audio_client, prtd->stream_id,
+ 				      FORMAT_LINEAR_PCM,
+@@ -281,7 +289,8 @@
+ 		ret = q6asm_media_format_block_multi_ch_pcm(
+ 				prtd->audio_client, prtd->stream_id,
+ 				runtime->rate, runtime->channels, NULL,
+-				prtd->bits_per_sample);
++				prtd->bits_per_sample,
++				prtd->sample_word_size);
+ 	} else if (substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
+ 		ret = q6asm_enc_cfg_blk_pcm_format_support(prtd->audio_client,
+ 							   prtd->stream_id,
+@@ -505,9 +514,11 @@
+ 	switch (params_format(params)) {
+ 	case SNDRV_PCM_FORMAT_S16_LE:
+ 		prtd->bits_per_sample = 16;
++		prtd->sample_word_size = 16;
+ 		break;
+ 	case SNDRV_PCM_FORMAT_S24_LE:
+ 		prtd->bits_per_sample = 24;
++		prtd->sample_word_size = 32;
+ 		break;
+ 	}
+ 
+@@ -906,7 +917,7 @@
+ 	if (dir == SND_COMPRESS_PLAYBACK) {
+ 		ret = q6asm_open_write(prtd->audio_client, prtd->stream_id, params->codec.id,
+ 				params->codec.profile, prtd->bits_per_sample,
+-				true);
++				prtd->sample_word_size, true);
+ 
+ 		if (ret < 0) {
+ 			dev_err(dev, "q6asm_open_write failed\n");
+@@ -973,6 +984,7 @@
+ 					       prtd->codec.id,
+ 					       prtd->codec.profile,
+ 					       prtd->bits_per_sample,
++					       prtd->sample_word_size,
+ 				       true);
+ 			if (ret < 0) {
+ 				dev_err(component->dev, "q6asm_open_write failed\n");

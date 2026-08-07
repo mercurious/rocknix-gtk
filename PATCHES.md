@@ -198,3 +198,35 @@ Each is kernel-image-only and preserves the module ABI (`uname -r` = `7.1.2`, un
 - **Verdict (honest):** the dmesg signature is field-observed; the fix's success metric is that
   signature counting zero across Boot B's plug matrix. **PENDING Boot B.**
 - **Upstreamability:** clean robustness fix (dri-devel/freedreno), disclosed as AI-assisted.
+
+### Patch #8 — `q6asm-24bit-word-size`: tell the DSP how a 24-bit sample actually sits
+- **Files:** `sound/soc/qcom/qdsp6/q6asm.c`, `q6asm.h`, `q6asm-dai.c` (`patches/0008-...`).
+- **The problem it solves:** DP audio at S24_LE arrives ~25dB low while S16_LE on the same port
+  is bit-honest to the clipping roof (the operator-metered tone matrix,
+  `WlMirrorTeardown_20260807`; the shipped S16 WirePlumber pin `d77ddb5` masks it). Mechanism:
+  the ASM stream is configured with `MULTI_CHANNEL_PCM_V2`, whose format block carries only
+  `bits_per_sample` — **no container/word-size field** — so "24" is ambiguous between
+  24-packed and 24-in-32. ALSA S24_LE is 24 valid bits LSB-justified in a 32-bit word; the
+  DSP's guess costs the level. Qualcomm's own resolution is `MULTI_CHANNEL_PCM_V3`
+  (`0x00010DDC`, verified against downstream `apr_audio-v2.h`), whose block replaces V2's
+  `reserved` with `sample_word_size` (12/24/32) — same wire size, same
+  `MEDIA_FMT_UPDATE_V2` command.
+- **What it does:** adds the V3 constant + block; plumbs `sample_word_size` from
+  `q6asm_dai_hw_params()` (S16→16/16, S24→24/32) through `q6asm_open_write()` and
+  `q6asm_media_format_block_multi_ch_pcm()`; **only** a linear-PCM stream with
+  `bits_per_sample==24 && sample_word_size==32` opens as V3 and sends the V3 block. The same
+  gate feeds both functions, so open and format can never disagree.
+- **Why it's safe:** the 16-bit path is **byte-identical on the wire** to stock (V2 struct,
+  same values), so the boot default with the S16 pin deployed is unchanged; compressed paths
+  can't reach the gate (`format != FORMAT_LINEAR_PCM`; compress `prtd` word size stays 0). No
+  stock `.ko` imports any `q6asm_*` symbol (checked live on the rig: 0 of 237 modules), so the
+  exported-signature change is image-only. If this Kona ADSP rejected V3 the failure is a
+  loud APR error at S24 stream open — never boot-affecting, and unreachable while the pin
+  holds.
+- **Verdict (honest):** mechanism class (justification ambiguity) is convicted by the tone
+  matrix; that V3 recovers the exact ~25dB is the hypothesis under test. **PENDING Boot C's
+  tone A/B** (S16 roof first, then S24 vs that roof with the pin lifted). On success the S16
+  pin retires in a follow-up (`ETK_DP_AUDIO_S16=0`), per the q6afe precedent: workaround →
+  root fix → tear the workaround down.
+- **Upstreamability:** clean ASoC qcom candidate; V3 is what downstream has shipped for
+  years, upstream simply never grew the field. Disclosed as AI-assisted.
