@@ -1,0 +1,55 @@
+--- a/drivers/usb/typec/mux/nb7vpq904m.c
++++ b/drivers/usb/typec/mux/nb7vpq904m.c
+@@ -261,12 +261,19 @@
+ 		return ret;
+ 
+ 	mutex_lock(&nb7->lock);
+-
+-	if (nb7->orientation != orientation) {
+-		nb7->orientation = orientation;
+ 
+-		ret = nb7vpq904m_set(nb7);
+-	}
++	/*
++	 * ROCKNIX-GTK / stale AUX_CC repair (ETK):
++	 * stock only reprograms on an orientation *change*, assuming the
++	 * cached value equals hardware state. Anything that desyncs them
++	 * (a swallowed switch call, a redriver power event, an i2c
++	 * glitch) leaves AUX_CC wrong with no repair path, because the
++	 * next identical request is skipped -- the "DP only links one
++	 * way up" class on this rig. Three idempotent i2c writes on a
++	 * plug-rate path are cheap; program always.
++	 */
++	nb7->orientation = orientation;
++	ret = nb7vpq904m_set(nb7);
+ 
+ 	mutex_unlock(&nb7->lock);
+ 
+@@ -281,16 +288,19 @@
+ 
+ 	mutex_lock(&nb7->lock);
+ 
+-	if (nb7->mode != state->mode) {
+-		nb7->mode = state->mode;
++	/*
++	 * ROCKNIX-GTK (ETK): same repair as nb7vpq904m_sw_set() -- a
++	 * mode-equality skip strands a stale register set whenever the
++	 * cache and the hardware disagree; program always.
++	 */
++	nb7->mode = state->mode;
+ 
+-		if (state->alt)
+-			nb7->svid = state->alt->svid;
+-		else
+-			nb7->svid = 0; // No SVID
++	if (state->alt)
++		nb7->svid = state->alt->svid;
++	else
++		nb7->svid = 0; // No SVID
+ 
+-		ret = nb7vpq904m_set(nb7);
+-	}
++	ret = nb7vpq904m_set(nb7);
+ 
+ 	mutex_unlock(&nb7->lock);
+ 
