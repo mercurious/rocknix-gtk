@@ -145,3 +145,56 @@ Each is kernel-image-only and preserves the module ABI (`uname -r` = `7.1.2`, un
   attribution between #4/#5 is deliberately not claimed.
 - **Upstreamability:** small robustness fix, reportable alongside the Patch #4 corroboration,
   disclosed as AI-assisted.
+
+### Patch #6 — `dp-bounded-enable-lock`: the compositor can no longer be taken hostage by a DP plug
+- **File:** `drivers/gpu/drm/msm/dp/dp_display.c` (`patches/0006-...`).
+- **The problem it solves:** plugging DP with a game running (or re-linking after a flap) can
+  freeze the entire compositor — both outputs, screencopy included — with no error and no
+  timeout; unplugging un-sticks it
+  (`~/etk/manual_forensics/drm_state_frozen_dpflap_20260807.txt`: atomic state all-healthy, the
+  wait is below it). Mechanism: `msm_dp_bridge_atomic_enable()` takes `event_mutex` **unbounded**
+  from the atomic commit tail, which already holds the CRTC commit lock — while the HPD event
+  thread holds the same mutex across full link training (plug/unplug/irq_hpd handlers). Under a
+  flap storm (or the pre-#3 phantom wedge) the HPD thread's holds can starve the commit
+  indefinitely: AUX timeouts × 5 training retries × requeued REPLUG events. Unplug "fixes" it
+  because AUX transfers get killed, the handler exits, the mutex frees.
+- **What it does:** adds `dp_enable_lock_timeout_ms` (uint, **default 10000**, `0644`; kernel
+  cmdline `msm.dp_enable_lock_timeout_ms`, runtime at
+  `/sys/module/msm/parameters/dp_enable_lock_timeout_ms`). The commit-side acquisition becomes a
+  trylock + 10ms-sleep loop; on expiry it logs `DP enable: event thread held event_mutex >Nms`
+  loudly and **drops the enable**. `0` = stock unbounded behaviour, live-switchable for A/B.
+- **Why it's safe:** dropping an enable is the same failure class as the three stock early
+  returns already in the function (state mismatch, set_mode failure): dark DP output, compositor
+  alive, next hotplug-driven modeset recovers. The 10s default clears the worst legitimate hold
+  (~6s: unplug's 5s audio-comp timeout + teardown) with margin. Departs from strict default-off
+  (operator decision 2026-08-07): the behaviour it changes is only ever reached mid-freeze.
+- **Rejected alternatives (recorded):** shrinking the HPD thread's hold means a new in-progress
+  `hpd_state` and a re-audit of every consumer — the honest upstream fix, wrong risk for a
+  downstream lane; bounding `atomic_post_disable()` too would skip `msm_dp_display_disable()`
+  and leak PHY/clock/runtime-PM state, and the evidence points at the enable path. The 5s
+  `audio_comp` wait on unplug-with-audio stays stock (bounded already, documented-known).
+- **Verdict (honest):** mechanism verified in source against the frozen-state capture; applies
+  clean; **PENDING Boot B in-game plug arm**. This is a mitigation, not the redesign — the
+  upstream report says so.
+- **Upstreamability:** report + downstream mitigation (dri-devel/freedreno), disclosed as
+  AI-assisted; proper fix is hold-shrinking in the HPD thread.
+
+### Patch #7 — `dpu-encoder-resolution`: survive the encoder-less hotplug window
+- **Files:** `drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c`, `dpu_kms.c` (`patches/0007-...`).
+- **The problem it solves:** three DPU paths resolve a CRTC's encoder through the **legacy**
+  `encoder->crtc` pointer, which is unset while a DP modeset attaches/detaches the encoder:
+  `dpu_crtc_get_vblank_counter()` and `dpu_crtc_get_scanout_position()` then fail — the observed
+  `dpu_crtc_get_vblank_counter: no encoder found for crtc` dmesg class — and return 0, snapping
+  the vblank counter backwards and corrupting vblank accounting mid-hotplug;
+  `dpu_kms_wait_for_commit_done()` matches zero encoders and **returns without waiting at all**,
+  the mirror-image failure.
+- **What it does:** `get_encoder_from_crtc()` falls back to the atomic state's `encoder_mask`
+  when the legacy scan misses (fixes both crtc queries at one site);
+  `dpu_kms_wait_for_commit_done()` walks `crtc->state->encoder_mask` directly (`crtc->state` is
+  already guarded non-NULL in the function).
+- **Why it's safe:** on healthy paths the mask and the legacy binding are identical, so behaviour
+  only changes inside the transition window where the legacy pointer lies. No knob — pure
+  robustness, unreachable outside the window.
+- **Verdict (honest):** the dmesg signature is field-observed; the fix's success metric is that
+  signature counting zero across Boot B's plug matrix. **PENDING Boot B.**
+- **Upstreamability:** clean robustness fix (dri-devel/freedreno), disclosed as AI-assisted.
