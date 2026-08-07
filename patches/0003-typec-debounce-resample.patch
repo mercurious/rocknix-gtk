@@ -1,0 +1,39 @@
+--- a/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_port.c
++++ b/drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_port.c
+@@ -230,6 +230,23 @@
+ 	spin_unlock_irqrestore(&pmic_typec_port->lock, flags);
+ 
+ 	dev_dbg(pmic_typec_port->dev, "Debounce cc complete\n");
++
++	/*
++	 * ROCKNIX-GTK / Type-C phantom-cable wedge (ETK):
++	 * a CC/attach edge that lands inside this 2ms window is dropped
++	 * twice over -- the ISR gates cc_change on !debouncing_cc and
++	 * get_cc returns -EBUSY -- and stock code never re-samples when
++	 * the window closes, so a detach during debounce is lost for
++	 * good: TCPM stays attached, the DP altmode is never torn down,
++	 * DRM reports a connected sink with the cable physically out,
++	 * and only a reboot clears it (typec_wedge_20260807, plug-flap
++	 * storms). Close every window with a notify instead: TCPM
++	 * re-reads CC via get_cc (no longer -EBUSY) and ignores
++	 * no-change events, so healthy plugs see one extra harmless
++	 * poll per debounce.
++	 */
++	if (pmic_typec_port->tcpm_port)
++		tcpm_cc_change(pmic_typec_port->tcpm_port);
+ }
+ 
+ static irqreturn_t pmic_typec_port_isr(int irq, void *dev_id)
+@@ -693,6 +710,12 @@
+ 
+ 	for (i = 0; i < pmic_typec_port->nr_irqs; i++)
+ 		disable_irq(pmic_typec_port->irq_data[i].irq);
++
++	/*
++	 * ROCKNIX-GTK (ETK): the debounce worker now notifies TCPM on
++	 * completion; drain it before the caller tears the port down.
++	 */
++	cancel_delayed_work_sync(&pmic_typec_port->cc_debounce_dwork);
+ }
+ 
+ int qcom_pmic_typec_port_probe(struct platform_device *pdev,

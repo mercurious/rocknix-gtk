@@ -70,3 +70,78 @@ Each is kernel-image-only and preserves the module ABI (`uname -r` = `7.1.2`, un
 - **Upstreamability:** both halves are straightforward bugfixes (dropped wakeup + probe-race
   retry) with no behaviour change on healthy paths; candidate for a real upstream submission,
   disclosed as AI-assisted.
+
+### Patch #3 — `typec-debounce-resample`: close the Type-C phantom-cable wedge
+- **File:** `drivers/usb/typec/tcpm/qcom/qcom_pmic_typec_port.c` (`patches/0003-...`).
+- **The problem it solves:** after rapid plug/unplug ("flap storms"), the rig reports a connected
+  DP sink and a `normal` orientation **with the cable physically out**; `echo detect >
+  status` still says connected; only a reboot clears it
+  (`~/etk/manual_forensics/typec_wedge_20260807.txt`). While wedged, a phantom low-speed USB HID
+  flaps on ~30s cycles — the udev-storm generator that keeps killing InputPlumber. Mechanism: the
+  driver's 2ms CC debounce swallows edges **twice** — the ISR gates `cc_change` on
+  `!debouncing_cc` (edge consumed), and `get_cc()` returns `-EBUSY` to TCPM (poll skipped) — and
+  nothing re-samples when the window closes. A detach edge inside the window is lost forever:
+  TCPM never runs `tcpm_detach()`, the DP altmode is never unregistered, the cached orientation
+  and DRM `link_ready` stay stale.
+- **What it does:** on debounce completion (`qcom_pmic_typec_port_cc_debounce()`), notify TCPM
+  with `tcpm_cc_change()` unconditionally. TCPM re-reads CC via `get_cc()` — no longer gated —
+  and its state machine ignores no-change events, so a healthy plug sees one extra harmless poll
+  per 2ms window. Companion hunk: `port_stop()` drains the worker with
+  `cancel_delayed_work_sync()` before teardown, since the worker now touches the tcpm port.
+- **Why it's safe:** bounded by construction — each `set_cc`/`start_toggling` schedules at most
+  one debounce completion, hence at most one extra notify; no locks are shared with TCPM's event
+  queue (the notify runs after the port spinlock drops, same shape as the existing ISR). No knob,
+  same reasoning as Patch #2: the stock alternative is a guaranteed unrecoverable wedge, and the
+  healthy-path delta is a no-op event.
+- **Verdict (honest):** mechanism decoded from source against the live wedge capture; applies
+  clean; **PENDING the Boot A cold-boot gate + flap-storm arm** (`scripts/dp_plug_protocol.md`).
+- **Upstreamability:** clean lost-edge bugfix, upstream candidate (linux-usb), disclosed as
+  AI-assisted.
+
+### Patch #4 — `typec-mux-eprobe-defer`: 7.1 regression, connector loses its mux/switch silently
+- **File:** `drivers/usb/typec/mux.c` (`patches/0004-...`). **Adopted from ROCKNIX PR #3080
+  (author: Anze <aanzdev@gmail.com>), pending upstream — carried here with credit** because our
+  7.1.2 tree has the identical regression and the fix is in shared code their PR ships only into
+  the SM8550 device dir.
+- **The problem it solves:** the 7.1 merge window added a skip-duplicates filter to
+  `typec_switch_match()`/`typec_mux_match()`. When the switch/mux driver hasn't probed yet at
+  fetch time, `class_find_device()` returns NULL, `container_of(NULL)` (device is the struct's
+  first member) yields NULL, the dedup loop "matches" it against an empty slot of an
+  **uninitialized stack array** and returns NULL — converting "not probed yet, defer" into a
+  silent "no connection". The consumer is then wired **permanently without its
+  orientation-switch/mux**: on this rig the nb7vpq904m redriver's AUX/SBU crossbar never gets
+  programmed, the plausible root of "DP only links in the normal plug orientation" (AUX_CC
+  power-on default = normal mapping). Our boot dmesg shows the exact fw_devlink cycle-breaks
+  (`typec-mux@1c` ↔ connector ↔ `phy@88e8000`) that make the probe-order race live; the
+  Odin 2/3 hit the fully-dead-DP variant of the same bug.
+- **What it does:** bail with `ERR_PTR(-EPROBE_DEFER)` **before** the dedup loop when no device
+  was found, and zero-init both fetch arrays so the dedup loop can never read stack garbage.
+  Restores the documented pre-7.1 contract of both functions.
+- **Why it's safe:** the deferred path is the designed one (callers already handle
+  `-EPROBE_DEFER`); a real registered device can never compare equal to a zeroed slot, so dedup
+  still fires only on true duplicates.
+- **Verdict (honest):** regression shape verified verbatim in our tree; our exposure is a race
+  (this boot's probe won it — `15-001c-switch`/`-retimer` registered, mux calls flowing), so the
+  reverse-orientation claim is **behavioral, PENDING Boot A arm 2**; the patch is correct
+  regardless of which mechanism the arm convicts.
+- **Upstreamability:** already in flight as ROCKNIX PR #3080; our role is corroboration
+  (SM8250/TCPM evidence), not duplication.
+
+### Patch #5 — `nb7vpq904m-always-program`: no stale-register short-circuits in the redriver
+- **File:** `drivers/usb/typec/mux/nb7vpq904m.c` (`patches/0005-...`).
+- **The problem it solves:** `nb7vpq904m_sw_set()` and `nb7vpq904m_retimer_set()` skip
+  reprogramming when the *cached* orientation/mode equals the request. The cache is assumed to
+  equal hardware state; anything that desyncs them (a fetch swallowed by the Patch #4 bug, a
+  redriver power event, an i2c glitch) strands `AUX_CC_REG` (0x09) — and the next identical
+  request is skipped, so there is **no repair path**. This is the standing "plug it the right
+  way" gotcha's second candidate mechanism, and it becomes reachable exactly when Patch #4
+  starts delivering calls the driver used to miss.
+- **What it does:** drops both equality guards — always cache, always call `nb7vpq904m_set()`.
+  Three idempotent i2c register writes on a plug-rate path.
+- **Why it's safe:** the writes are the same values the guard would have written on a "real"
+  change; plug/unplug cadence is human-rate; the driver serializes via its own mutex.
+- **Verdict (honest):** hygiene + repair-path fix; correctness argued from source; behavioral
+  proof rides Boot A arm 2 (reverse-orientation DP link) with Patch #4 in the same image —
+  attribution between #4/#5 is deliberately not claimed.
+- **Upstreamability:** small robustness fix, reportable alongside the Patch #4 corroboration,
+  disclosed as AI-assisted.
