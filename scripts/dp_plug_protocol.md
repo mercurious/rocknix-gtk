@@ -9,6 +9,13 @@ dp_state_probe.sh <declared>   # pre-probe: layers must AGREE before acting
 dp_state_probe.sh <declared>   # post-probe
 ```
 
+Physical-orientation reference (operator note, 2026-08-07): "normal"/"reverse" are kernel
+truth, **per cable-insertion** — the Retroid-logo face does NOT map to a fixed orientation
+across cables (with the charger cable that day, logo-up read `reverse`). At the start of a
+session, plug the DP dock's cable once, run the probe, and note which logo face *that cable*
+calls `normal`; use that as the session's physical reference. Post-Patch-#4/#5 the distinction
+should stop mattering (both faces link) — arm 2 is exactly that claim.
+
 Rules:
 - **One variable per step.** Never combine a plug with a launch, a flip, or a restart.
 - **DISAGREE freezes the protocol.** Keep `dp_edge_trace.sh` running in a second

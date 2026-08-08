@@ -61,3 +61,47 @@ vault, and telemetry survive all of it (they live on the storage partition, not 
   net is proven on 7.1.2.
 - Both ETK patches applied with zero fuzz — neither `msm_gpu.c` nor `q6afe.c` hunk sites
   drifted across mainline 7.0.11 → 7.1.2.
+
+## 20260801-0.4 series — the DP A/V-out session (2026-08-07, patches #3–#8)
+
+Three cumulative artifacts, three operator cold boots, one patch cluster per boot
+(`scripts/dp_plug_protocol.md` holds the full per-boot checklists):
+
+| artifact | adds | gate (operator cold boot) | status |
+|---|---|---|---|
+| `-0.4` (sha `5cbf86cb…`, stock-exact 60,246,528 B, drift = expected-class only, all 41 patches zero-fuzz) | #3 debounce-resample, #4 mux-eprobe-defer, #5 nb7-always-program | Boot A: charge/USB sanity both orientations, **reverse-orientation DP arm**, flap-storm ×3 → `dp_state_probe.sh out` AGREE, pads alive | **BUILT — boot PENDING** |
+| `-0.4.1` (sha `e603ee94…`, stock-exact, drift = expected-class only, all 43 patches zero-fuzz) | #6 bounded-enable-lock, #7 encoder-resolution | Boot B: at-ES matrix ×3, **in-game plug arm** (no compositor freeze), `no encoder found for crtc` count = 0 | **BUILT — boot PENDING** |
+| `-0.4.2` (sha `4e5a429e…`, stock-exact, drift = expected-class only, all 44 patches zero-fuzz) | #8 q6asm-24bit-word-size | Boot C: S16 tone at roof first (wire-parity proof), then S24 tone A/B vs the roof with the pin lifted | **BUILT — boot PENDING** |
+
+Pre-patch baseline (2026-08-07, kernel `-0.3.1`, read-only probe — full record in
+`~/etk/manual_forensics/dp_session_baseline_20260807.txt`): nb7vpq904m registered its
+switch+retimer this boot and tcpm's mux-request path fired ("Requesting mux state 1, usb-role 2,
+orientation 2" on a reverse-plugged charger) — so the Patch #4 race was *won* on this boot,
+consistent with it being a race, not a constant; the reverse-orientation claim therefore rests on
+Boot A's behavioral arm, not on a captured mux-less boot. tcpm ring log confirmed drain-on-read;
+nb7 regmap has no debugfs read-back (AUX_CC not directly observable). The S16 pin file survived
+its first cold boot (persistence half of its gate — the audible half rides Boot C).
+
+Known-still-true until the boots run: in-game plug freezes (P1b) remain on `-0.4`; the S24 level
+loss remains on everything below `-0.4.2`; expected-freezy results on Boot A's arm 3 are the
+honest record, not a regression.
+
+## P2 — kernel-native mirroring on SM8250: verdict = not a patch, a feature port
+
+Investigated for the 2026-08-07 session brief and closed with a source-level answer:
+
+- The SM8250 DPU catalog exposes **WB_2, a capture writeback block** (advertised 2560-wide,
+  hardware 4096, linear-only, RGB + NV12) and **no CWB (concurrent writeback) block at all** —
+  `possible_clones` is never even computed on this SoC (`dpu_kms.c` gates it on
+  `catalog->cwb_count`, which only SM8650-and-newer catalogs define).
+- Upstream dpu "clone mode" pairs exactly one real-time encoder with one **writeback** encoder
+  (`dpu_encoder_get_clones()` matches `DRM_MODE_ENCODER_VIRTUAL` ↔ `DSI` only; DP/TMDS is
+  explicitly excluded with an upstream TODO) — i.e. clone mode is *mirror-into-memory*, not two
+  live outputs.
+- One CRTC driving two live interfaces (DSI + DP) has **no implementation anywhere in the
+  tree**, and the CWB hardware the current implementation leans on is absent on this silicon.
+
+So a kernel-side "clone the panel to DP" is a feature port against missing hardware support —
+out of this lane's scope. The `Writeback-1` connector is real and usable for *capture* by a
+compositor-side consumer (a sway/wlroots lane, if ever). The supported posture stands:
+record-only capture is the capture path; wl-mirror becomes reliable as the P0/P1b fixes land.
