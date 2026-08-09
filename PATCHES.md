@@ -223,10 +223,21 @@ Each is kernel-image-only and preserves the module ABI (`uname -r` = `7.1.2`, un
   exported-signature change is image-only. If this Kona ADSP rejected V3 the failure is a
   loud APR error at S24 stream open — never boot-affecting, and unreachable while the pin
   holds.
-- **Verdict (honest):** mechanism class (justification ambiguity) is convicted by the tone
-  matrix; that V3 recovers the exact ~25dB is the hypothesis under test. **PENDING Boot C's
-  tone A/B** (S16 roof first, then S24 vs that roof with the pin lifted). On success the S16
-  pin retires in a follow-up (`ETK_DP_AUDIO_S16=0`), per the q6afe precedent: workaround →
-  root fix → tear the workaround down.
-- **Upstreamability:** clean ASoC qcom candidate; V3 is what downstream has shipped for
-  years, upstream simply never grew the field. Disclosed as AI-assisted.
+- **Verdict (honest): WITHDRAWN 2026-08-09 — regression convicted by A/B, mechanism under
+  re-audit.** With this patch in the image (`-0.4.2`), the **first AFE start of
+  DISPLAY_PORT_RX times out (-110) on every boot** (3/3 cold boots, fires at the plug's
+  profile switch), leaving the port stuck DSP-side (later starts bounce -22) until reboot.
+  `-0.4.1` (identical minus this patch) starts the port clean and passed the full-scale S16
+  tone at the clipping roof. The puzzle, recorded honestly: the failure fires at BE prepare,
+  which precedes every runtime path this patch touches (FE open/format run after BE start;
+  the S16 wire is V2-byte-identical — and the speaker path on `-0.4.2` played fine through
+  the same q6asm code). Re-audit must therefore consider non-semantic effects (image layout /
+  boot timing shifting a latent DP-audio bring-up race — note the stock `hdmi-audio-codec
+  -22` probe storm at t≈3.7s on every boot, all kernels). The staged twin (`9997`) is pulled
+  from all build tiers; the tracked patch file remains for the re-audit. The S16 WirePlumber
+  pin stays as the supported path. Independent robustness finding from the failure mode: a
+  timed-out AFE start wedges the port forever (kernel never sends STOP for a port it thinks
+  never started) — a retry+cleanup patch in the Patch #2 mold is queued regardless of the
+  re-audit outcome.
+- **Upstreamability:** on hold until the re-audit; the V3 word-size mechanism remains the
+  correct upstream shape once the regression is understood. Disclosed as AI-assisted.

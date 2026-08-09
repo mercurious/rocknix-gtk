@@ -71,7 +71,7 @@ Three cumulative artifacts, three operator cold boots, one patch cluster per boo
 |---|---|---|---|
 | `-0.4` (sha `5cbf86cb…`, stock-exact 60,246,528 B, drift = expected-class only, all 41 patches zero-fuzz) | #3 debounce-resample, #4 mux-eprobe-defer, #5 nb7-always-program | Boot A: charge/USB sanity both orientations, **reverse-orientation DP arm**, flap-storm ×3 → `dp_state_probe.sh out` AGREE, pads alive | **BOOT A RUN 2026-08-08 — see below** |
 | `-0.4.1` (sha `e603ee94…`, stock-exact, drift = expected-class only, all 43 patches zero-fuzz) | #6 bounded-enable-lock, #7 encoder-resolution | Boot B: at-ES matrix ×3, **in-game plug arm** (no compositor freeze), `no encoder found for crtc` count = 0 | **BOOT B RUN 2026-08-08 — see below** |
-| `-0.4.2` (sha `4e5a429e…`, stock-exact, drift = expected-class only, all 44 patches zero-fuzz) | #8 q6asm-24bit-word-size | Boot C: S16 tone at roof first (wire-parity proof), then S24 tone A/B vs the roof with the pin lifted | **BUILT — boot PENDING** |
+| `-0.4.2` (sha `4e5a429e…`, stock-exact, drift = expected-class only, all 44 patches zero-fuzz) | #8 q6asm-24bit-word-size | Boot C: S16 tone at roof first (wire-parity proof), then S24 tone A/B vs the roof with the pin lifted | **WITHDRAWN — see Boot C** |
 
 Pre-patch baseline (2026-08-07, kernel `-0.3.1`, read-only probe — full record in
 `~/etk/manual_forensics/dp_session_baseline_20260807.txt`): nb7vpq904m registered its
@@ -132,6 +132,29 @@ honest record, not a regression.
   mirror-mode UX returns with the daemon post-series.
 - Reps: one full at-ES cycle + one full in-game cycle, single-variable clean. Additional
   reps accumulate with normal use; the counters above are the standing regression metrics.
+
+### Boot C verdicts (2026-08-08/09, three cold boots + A/B ladder)
+
+- **Patch #8 WITHDRAWN** (full record in its PATCHES.md entry): first AFE start of
+  DISPLAY_PORT_RX fails -110 on **3/3 `-0.4.2` cold boots** (fires at the plug's profile
+  switch; port then stuck DSP-side, -22 on all retries, reboot-only clear). A/B ladder:
+  `-0.4.1` starts the port **clean on first try** — conviction by delta despite the failure
+  point preceding the patch's runtime paths (mechanism re-audit queued; suspicion includes
+  image-layout/timing shift of a latent bring-up race).
+- **S16 full-stack tone on `-0.4.1`: CLIPPING ROOF** (pw-play → PipeWire → pin-forced
+  S16_LE, verified in live hw_params → DP → OBS meter, operator-confirmed). The supported
+  capture-audio path is validated on the series candidate. Speaker-path tone on `-0.4.2`
+  also played clean — the wound was DP-port-specific.
+- **Tone methodology corrected and locked**: tones are ssh-driven (generated wav +
+  `pw-play`, or `speaker-test` for direct-hw), operator meters/listens; the 2026-08-08
+  "-42dB tone" was bleed metered with no tone playing (methodology gap, now closed by the
+  hear-check-first protocol).
+- **`-0.4.1` = the series candidate**: typec cluster (Boot A) + DP/DPU pair (Boot B) + S16
+  audio roof (Boot C first half) all validated on or carried by it. The S24 root fix
+  returns with the #8 re-audit.
+- **New robustness patch queued from the failure mode** (independent of #8): AFE port-start
+  retry-on-timeout + STOP-cleanup — a timed-out first start currently wedges the port until
+  reboot on any kernel.
 
 ## P2 — kernel-native mirroring on SM8250: verdict = not a patch, a feature port
 
