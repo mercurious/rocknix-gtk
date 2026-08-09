@@ -70,7 +70,7 @@ Three cumulative artifacts, three operator cold boots, one patch cluster per boo
 | artifact | adds | gate (operator cold boot) | status |
 |---|---|---|---|
 | `-0.4` (sha `5cbf86cb…`, stock-exact 60,246,528 B, drift = expected-class only, all 41 patches zero-fuzz) | #3 debounce-resample, #4 mux-eprobe-defer, #5 nb7-always-program | Boot A: charge/USB sanity both orientations, **reverse-orientation DP arm**, flap-storm ×3 → `dp_state_probe.sh out` AGREE, pads alive | **BOOT A RUN 2026-08-08 — see below** |
-| `-0.4.1` (sha `e603ee94…`, stock-exact, drift = expected-class only, all 43 patches zero-fuzz) | #6 bounded-enable-lock, #7 encoder-resolution | Boot B: at-ES matrix ×3, **in-game plug arm** (no compositor freeze), `no encoder found for crtc` count = 0 | **BUILT — boot PENDING** |
+| `-0.4.1` (sha `e603ee94…`, stock-exact, drift = expected-class only, all 43 patches zero-fuzz) | #6 bounded-enable-lock, #7 encoder-resolution | Boot B: at-ES matrix ×3, **in-game plug arm** (no compositor freeze), `no encoder found for crtc` count = 0 | **BOOT B RUN 2026-08-08 — see below** |
 | `-0.4.2` (sha `4e5a429e…`, stock-exact, drift = expected-class only, all 44 patches zero-fuzz) | #8 q6asm-24bit-word-size | Boot C: S16 tone at roof first (wire-parity proof), then S24 tone A/B vs the roof with the pin lifted | **BUILT — boot PENDING** |
 
 Pre-patch baseline (2026-08-07, kernel `-0.3.1`, read-only probe — full record in
@@ -112,6 +112,26 @@ honest record, not a regression.
 - Legend for this hardware: the Anker C→HDMI adapter maps **logo-down = normal (works),
   logo-up = reverse (dead)**; the Retroid charge cable maps logo-up = reverse. Per-cable,
   probe is truth.
+
+### Boot B verdicts (2026-08-08, same night, operator cold boot)
+
+- **§4.4 gate PASS**: `7.1.2 #3`, sha exact, 29/237, keepalive armed,
+  `msm.dp_enable_lock_timeout_ms = 10000` live (Patch #6 armed), zero errors.
+- **THE HEADLINE — in-game hotplug PASSES both directions**: GT5P running, Anker plugged
+  mid-game → game kept rendering (jumped to the DP output per stock record-only semantics),
+  **no compositor freeze**; unplugged mid-game → game returned to the panel, no freeze.
+  Yesterday this exact pair froze both outputs until unplug. Counters across the whole boot:
+  `no encoder found for crtc` = **0** (Patch #7's metric; this path used to spray it),
+  `DP enable:` guard fires = **0** (the #6 timeout never needed to trip — contention
+  resolved inside the trylock window; the freeze didn't get converted, it didn't happen),
+  `audio comp timeout` = 0. Probes AGREE at every step; pads alive throughout.
+- **Environment note**: arms ran with the dpmirror healer REMOVED via the (newly real)
+  `ETK_DP_MIRROR=0` kill-switch — mother-repo `install.sh` STEP 6.7 deployed
+  unconditionally before `edd93d8`; two Boot A/B arms were contaminated by it before the
+  fix. Record-only stock semantics (panel idles while DP is primary) observed and expected;
+  mirror-mode UX returns with the daemon post-series.
+- Reps: one full at-ES cycle + one full in-game cycle, single-variable clean. Additional
+  reps accumulate with normal use; the counters above are the standing regression metrics.
 
 ## P2 — kernel-native mirroring on SM8250: verdict = not a patch, a feature port
 
