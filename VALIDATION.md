@@ -69,7 +69,7 @@ Three cumulative artifacts, three operator cold boots, one patch cluster per boo
 
 | artifact | adds | gate (operator cold boot) | status |
 |---|---|---|---|
-| `-0.4` (sha `5cbf86cb…`, stock-exact 60,246,528 B, drift = expected-class only, all 41 patches zero-fuzz) | #3 debounce-resample, #4 mux-eprobe-defer, #5 nb7-always-program | Boot A: charge/USB sanity both orientations, **reverse-orientation DP arm**, flap-storm ×3 → `dp_state_probe.sh out` AGREE, pads alive | **BUILT — boot PENDING** |
+| `-0.4` (sha `5cbf86cb…`, stock-exact 60,246,528 B, drift = expected-class only, all 41 patches zero-fuzz) | #3 debounce-resample, #4 mux-eprobe-defer, #5 nb7-always-program | Boot A: charge/USB sanity both orientations, **reverse-orientation DP arm**, flap-storm ×3 → `dp_state_probe.sh out` AGREE, pads alive | **BOOT A RUN 2026-08-08 — see below** |
 | `-0.4.1` (sha `e603ee94…`, stock-exact, drift = expected-class only, all 43 patches zero-fuzz) | #6 bounded-enable-lock, #7 encoder-resolution | Boot B: at-ES matrix ×3, **in-game plug arm** (no compositor freeze), `no encoder found for crtc` count = 0 | **BUILT — boot PENDING** |
 | `-0.4.2` (sha `4e5a429e…`, stock-exact, drift = expected-class only, all 44 patches zero-fuzz) | #8 q6asm-24bit-word-size | Boot C: S16 tone at roof first (wire-parity proof), then S24 tone A/B vs the roof with the pin lifted | **BUILT — boot PENDING** |
 
@@ -85,6 +85,33 @@ its first cold boot (persistence half of its gate — the audible half rides Boo
 Known-still-true until the boots run: in-game plug freezes (P1b) remain on `-0.4`; the S24 level
 loss remains on everything below `-0.4.2`; expected-freezy results on Boot A's arm 3 are the
 honest record, not a regression.
+
+### Boot A verdicts (2026-08-08, operator cold boot, harness-gated)
+
+- **§4.4 gate PASS**: uname `7.1.2 #2` builder rocknix-gtk, gtktest sha exact, 29/237 modules,
+  keepalive armed, audio card up, zero typec/tcpm/nb7 dmesg errors, S16 pin persisted.
+- **Patch #3 (wedge)** — *prevention*: clean 5-cycle flap storm survived, `out`-probe AGREE ×3
+  across 35s dwells. A healer-contaminated storm earlier in the night DID wedge (final detach
+  eaten while etk-dpmirror's pad-heal fought the edges) — single-resample is beatable under
+  storm+noise; follow-up = delayed re-check after debounce completion (captures:
+  session tcpm logs, `typec_wedge` comparison). *Recovery — NEW*: a wedged port resyncs with
+  **one replug cycle** (verified live: stale SRC_READY → clean re-attach → tracked detach →
+  AGREE). Yesterday's wedge was reboot-only. Facet: video does not retrain on a replug-over-
+  phantom (stale `link_ready` no-ops the plug path) — clears with the state.
+- **Patches #4/#5 (reverse orientation)** — **arm 2 FAIL, mechanism relocated**: in reverse,
+  PD is healthy, DP alt-mode enters (`svid ff01 active`), the typec_displayport module latches
+  `hpd: 1`, `configuration`/`pin_assignment` are byte-identical to the working normal face
+  ([C]) — and with `drm.debug=0x117` armed, msm_dp logs **nothing**: no notify, no AUX, no
+  training. The documented "dead AUX" is actually a **dead hpd-forwarding hop**
+  (oob_hotplug_event → drm_aux_bridge → msm_dp bridge), orientation-correlated by a mechanism
+  not yet visible; the nb7 guards were not the live culprit. Evidence:
+  `~/etk/manual_forensics/reverse_aux_drmdebug_20260808.txt`. #4/#5 stay (correct hygiene;
+  #4's race is real) — the reverse fix is a follow-up patch in the forwarding layer (=y).
+- **Pads**: InputPlumber + ES alive through every arm (healer stopped mid-session for the
+  clean storm; no reboot needed at any point).
+- Legend for this hardware: the Anker C→HDMI adapter maps **logo-down = normal (works),
+  logo-up = reverse (dead)**; the Retroid charge cable maps logo-up = reverse. Per-cable,
+  probe is truth.
 
 ## P2 — kernel-native mirroring on SM8250: verdict = not a patch, a feature port
 
