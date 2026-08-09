@@ -199,6 +199,17 @@ SBU copper with the PM8150B ISRC current source + ADC (drive SBU1/SBU2, read whi
 sees the dongle's AUX termination per orientation) — DBG8 design, fresh session. Until
 then the community guidance stands: logo-down/normal orientation is the working face.
 
+**Session-2 addendum (2026-08-10, Android golden-reference probes):** reverse orientation
+**works on the Android boot of the same board** — the hardware-limitation branch is dead
+and the copper probe is superseded. Android's vendor DT keeps the ENTIRE redriver i2c bus
+(`i2c@884000`) disabled — the chip is never software-touched there — and models no
+enable GPIO (ROCKNIX's DTS invents `tlmm 9`). Two falsifications banked on the Linux
+side: DBG8 (zero nb7 i2c writes, full power cycle, reverse-first) still fails, so write-
+silence alone is not parity; the gpio9 hands-off cell (DBG9) remains untested. Parked
+pending the root-assisted golden dump: Magisk the Android boot, dump nb7/QMP/PMIC
+registers byte-exact while reverse works, diff against this ladder — the divergence is
+the fix. Full narrative: the ReverseOrientationFix dossier (local evidence bank).
+
 Investigated for the 2026-08-07 session brief and closed with a source-level answer:
 
 - The SM8250 DPU catalog exposes **WB_2, a capture writeback block** (advertised 2560-wide,
