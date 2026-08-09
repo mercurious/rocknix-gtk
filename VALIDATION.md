@@ -148,7 +148,13 @@ honest record, not a regression.
 - **Tone methodology corrected and locked**: tones are ssh-driven (generated wav +
   `pw-play`, or `speaker-test` for direct-hw), operator meters/listens; the 2026-08-08
   "-42dB tone" was bleed metered with no tone playing (methodology gap, now closed by the
-  hear-check-first protocol).
+  hear-check-first protocol). **Closing footnote (2026-08-10):** a stale OBS source-level
+  monitor state was silently blocking the operator's headphone monitoring throughout the
+  audio arms (fixed: re-toggle Audio Monitoring on the capture source). No conclusion
+  changes — AFE failures were dmesg-proven and the S16 roof was METER-validated (meters
+  were unaffected) — but the audible half of the chain is now ear-validated end-to-end,
+  and as a bonus golden datapoint the ear check ran over **Android reverse-orientation DP
+  audio** (the golden reference does audio too).
 - **`-0.4.1` = the series candidate**: typec cluster (Boot A) + DP/DPU pair (Boot B) + S16
   audio roof (Boot C first half) all validated on or carried by it. The S24 root fix
   returns with the #8 re-audit.
