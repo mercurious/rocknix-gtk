@@ -156,6 +156,19 @@ honest record, not a regression.
   retry-on-timeout + STOP-cleanup — a timed-out first start currently wedges the port until
   reboot on any kernel.
 
+### Promotion boot (2026-08-09) — `-0.4.1` is the daily driver
+
+Final cold boot ran the last untested arm and the promotion in one cycle, **with the Anker
+attached from power-on**: auto-boot seeded (`saved_entry=etk-gtk-test`, no menu pick), typec
+negotiated during boot, DP-1 connected from cold start, first AFE start clean (0 errors),
+mirror daemon restored — **operator confirms mirror engaged on boot**. Unplug afterward
+fired the pad-heal ladder and the rig came through: post-cycle probe AGREE, zero AFE errors,
+zero no-encoder lines, pads and daemons all active. The full real-world capture workflow
+(boot plugged → mirror → unplug → heal) is functioning on the promoted kernel. The matrix
+is complete: plug before boot / at ES / in-game, unplug any time, storm survival, and
+replug-recovery all hold on `-0.4.1`. Remaining open items ride the follow-up queue
+(reverse orientation, storm-hardened debounce, AFE start cleanup, #8 re-audit).
+
 ## P2 — kernel-native mirroring on SM8250: verdict = not a patch, a feature port
 
 Investigated for the 2026-08-07 session brief and closed with a source-level answer:
