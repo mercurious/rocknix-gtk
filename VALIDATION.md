@@ -169,7 +169,35 @@ is complete: plug before boot / at ES / in-game, unplug any time, storm survival
 replug-recovery all hold on `-0.4.1`. Remaining open items ride the follow-up queue
 (reverse orientation, storm-hardened debounce, AFE start cleanup, #8 re-audit).
 
-## P2 — kernel-native mirroring on SM8250: verdict = not a patch, a feature port
+## Reverse-orientation diagnostic ladder (2026-08-09, seven instrumented builds)
+
+The most thorough hardware/software bisection this project has run. Ledger
+(`-0.4.1.9`…`.15`, all staged-only DBG patches, all operator-forged/booted, evidence in
+`~/etk/manual_forensics/` + the ReverseOrientationFix dossier):
+
+| build | experiment | verdict |
+|---|---|---|
+| .9/.10 | narrate hpd chain (drm oob → bridge-conn → msm_dp) + drm.debug handler trace | **event delivery WORKS in reverse**; plug handler runs, AUX probe times out ~3.5s, gives up — the old "forwarding hop" theory falsified, dead layer = AUX |
+| .11 | narrate nb7 redriver (mode/orientation/AUX_CC writes) | **redriver told correctly** (DP state, reverse=1, AUX_CC=0x1 written) — module/mux stack fully exonerated |
+| .12 | force AUX_CC=0x0 (straight) in reverse | dead — crossbar sense not the fix alone |
+| .13 | suppress QMP com PORTSELECT flip | dead — com-level double-flip theory falsified |
+| .14 | dump PM8150B typec bank, normal-vs-reverse | **one byte differs (the CC status bit)** — PMIC has zero orientation-dependent config; no hidden SBU gate there |
+| .15 | suppress DP-phy-level flip too (configure_dp_mode forced normal) | **inconclusive by design** — that code runs at link power-on, *after* the AUX probe that fails; mainline's AUX init is orientation-blind |
+
+Downstream (kona techpack) comparison: AUX setup is orientation-blind there too — on all
+known working designs SBU crossing is **off-SoC** (fsa4480 analog mux on reference boards;
+the nb7 crossbar here). Downstream also has two mainline-absent DP-phy capabilities noted
+for the record (DP_PHY_SPARE0 orientation/lane mailbox; TXn_TX_POL_INV per-lane P/N swap
+driven by a board DT property — proof that copper-level pair crossing is a real, register-
+compensable board class).
+
+**Standing theory after full exoneration of the software stack:** the nb7's AUX_CC cross
+position does not conduct on this board (chip strap/errata or SBU copper detail); normal's
+straight path is proven; reverse's required cross is dead in both crossbar senses with
+every SoC-side flip permutation. **Next discriminator is physical, not register:** map the
+SBU copper with the PM8150B ISRC current source + ADC (drive SBU1/SBU2, read which pin
+sees the dongle's AUX termination per orientation) — DBG8 design, fresh session. Until
+then the community guidance stands: logo-down/normal orientation is the working face.
 
 Investigated for the 2026-08-07 session brief and closed with a source-level answer:
 
