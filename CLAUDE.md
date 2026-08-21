@@ -9,6 +9,8 @@ q6afe audio-probe-race root fix.
 ## Reading order (this repo)
 `README.md` → `RECIPE.md` / `BUILDING.md` (the container recipe; `scripts/` provisions it) →
 `PATCHES.md` → `VALIDATION.md` → `groundtruth/` (the staging byte-parity evidence).
+For the 20260901 chassis lane: `UPSTREAM_20260901.md` (K1 prep — upstream deltas since
+20260801, surveyed 2026-08-21, with the release-day execution order).
 
 ## How artifacts flow (never deviate)
 1. **Mint**: `~/etk/forge.sh kernel` conducts `~/etk/tools/forge/lane_kernel.sh` on **etk-cloud**
