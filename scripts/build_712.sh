@@ -79,13 +79,28 @@ cp /kernel/staging/config-7.1.2-rig.txt "$OUT/.config"
 # so the only deltas vs stock are toolchain-version strings (zero functional
 # drift, the recipe's whole contract). Inert on SM8250 either way (no FEAT_LSUI).
 "$SRC/scripts/config" --file "$OUT/.config" --disable CONFIG_ARM64_LSUI
+# GTK wdt-bark (2026-08-27): enable the watchdog pretimeout governor
+# framework, panic as the default governor. CONFIG_QCOM_WDT=y and the sm8250
+# bark IRQ (GIC_SPI 0) are already in the rig ground truth; this adds ONLY
+# the governor plumbing. DARK AT RUNTIME: nothing on the rig opens
+# /dev/watchdog0 today, so the kernel behaves bit-for-bit identically until
+# the operator arms it (systemd RuntimeWatchdogUSec property — a separate,
+# harness-validated step). Purpose: the fast PANIC class (ETK census
+# 2026-08-27) dies with ZERO kmsg on a SoC with no pstore and no logged PON
+# reason; a bark->panic converts that silent death into logged stacks the
+# ETK blackbox can fsync within ~1 s.
+"$SRC/scripts/config" --file "$OUT/.config" \
+  --enable CONFIG_WATCHDOG_PRETIMEOUT_GOV \
+  --enable CONFIG_WATCHDOG_PRETIMEOUT_DEFAULT_GOV_PANIC \
+  --enable CONFIG_WATCHDOG_PRETIMEOUT_GOV_NOOP \
+  --enable CONFIG_WATCHDOG_PRETIMEOUT_GOV_PANIC
 
 MAKE="make -C $SRC O=$OUT ARCH=arm64 CC=$KCC HOSTCC=$KCC KBUILD_BUILD_HOST=rocknix-gtk -j6"
 
 # --- 5. olddefconfig + drift check against ground truth ---
 $MAKE olddefconfig > /tmp/olddefconfig.log 2>&1 || { cat /tmp/olddefconfig.log; die "olddefconfig failed"; }
 diff /kernel/staging/config-7.1.2-rig.txt "$OUT/.config" > /kernel/config712.drift
-log "config drift vs rig ground truth (expect only INITRAMFS/FIRMWARE paths + toolchain-probe lines):"
+log "config drift vs rig ground truth (expect only INITRAMFS/FIRMWARE paths + toolchain-probe lines + the wdt pretimeout governor block):"
 cat /kernel/config712.drift
 
 # --- 6. The build (Image + modules) ---
