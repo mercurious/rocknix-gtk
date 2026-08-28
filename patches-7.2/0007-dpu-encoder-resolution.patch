@@ -1,0 +1,45 @@
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c
+@@ -60,6 +60,21 @@
+ 		if (encoder->crtc == crtc)
+ 			return encoder;
+ 
++	/*
++	 * ROCKNIX-GTK / hotplug-window robustness (ETK):
++	 * the legacy encoder->crtc binding is unset while a DP modeset is
++	 * attaching or detaching the encoder, so vblank-counter and
++	 * scanout-position queries landing in that window fail with "no
++	 * encoder found for crtc" and the counter jumps to 0, corrupting
++	 * vblank accounting (seen through every plug-under-load freeze).
++	 * Fall back to the atomic state's encoder mask, which stays valid
++	 * across the transition.
++	 */
++	if (crtc->state) {
++		drm_for_each_encoder_mask(encoder, dev, crtc->state->encoder_mask)
++			return encoder;
++	}
++
+ 	return NULL;
+ }
+ 
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
+@@ -511,9 +511,15 @@
+ 		return;
+ 	}
+ 
+-	list_for_each_entry(encoder, &dev->mode_config.encoder_list, head) {
+-		if (encoder->crtc != crtc)
+-			continue;
++	/*
++	 * ROCKNIX-GTK (ETK): walk the atomic state's encoder mask instead of
++	 * the legacy encoder->crtc binding -- the legacy pointer is unset
++	 * during the DP attach window, and matching zero encoders here means
++	 * returning without having waited for anything mid-modeset.
++	 * crtc->state is already guarded non-NULL above; on healthy paths the
++	 * mask and the legacy binding are identical.
++	 */
++	drm_for_each_encoder_mask(encoder, dev, crtc->state->encoder_mask) {
+ 		/*
+ 		 * Wait for post-flush if necessary to delay before
+ 		 * plane_cleanup. For example, wait for vsync in case of video

@@ -3,6 +3,20 @@
 Discrete patches over the reconstructed ROCKNIX `7.1.2` SM8250 tree (see `BUILDING.md`).
 Each is kernel-image-only and preserves the module ABI (`uname -r` = `7.1.2`, unchanged).
 
+> **7.2 / ROCKNIX 20260901 status (2026-08-28):** upstream bumps SM8250 to kernel
+> **7.2**. The rebased set lives in **`patches-7.2/`** (six active, verified zero-fuzz
+> against real v7.2 sources, pristine and layered over ROCKNIX's own `7.2/0010`):
+> #1 refreshed (context drift only — the `recover_worker()` punishment branch is
+> byte-identical in 7.2), #2/#3/#5/#7 carried unchanged, **#4 reworked to the switch
+> side only** (7.2 removed the buggy mux-side dedup loop; `typec_switch_match()` still
+> carries it), **#6 DROPPED — obsolete**: 7.2 removed `event_mutex` from
+> `dp_display.c` entirely, the lock it bounded no longer exists (DP hotplug matrix
+> re-validation replaces it). `patches/` remains the shipping 7.1.2 set until the 7.2
+> kernel passes the cold-boot gate. Full survey: `UPSTREAM_20260901.md`; lane:
+> `scripts/build_72.sh`. Note for upstreaming: ROCKNIX `c50963e3` independently
+> root-caused Patch #2's q6afe missing-error-case bug (they sidestep it with
+> audio-as-modules; our waiter-wake remains the mainline-correct fix).
+
 ### Patch #1 — `kgsl-parity`: keep a hung VM_BIND context alive (`msm.context_keepalive`)
 - **File:** `drivers/gpu/drm/msm/msm_gpu.c` (`patches/0001-...`).
 - **The problem it solves:** on an a6xx GPU hang, `recover_worker()` resets the GPU but then

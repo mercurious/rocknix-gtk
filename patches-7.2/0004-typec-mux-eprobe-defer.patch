@@ -1,0 +1,46 @@
+--- a/drivers/usb/typec/mux.c
++++ b/drivers/usb/typec/mux.c
+@@ -58,6 +58,20 @@
+ 	dev = class_find_device(&typec_mux_class, NULL, fwnode,
+ 				switch_fwnode_match);
+ 
++	/*
++	 * ROCKNIX-GTK / 7.1 regression, adopted from ROCKNIX PR #3080
++	 * (Anze <aanzdev@gmail.com>), pending upstream: the dedup check
++	 * below must not run when no device was found -- struct device is
++	 * the first member of struct typec_switch_dev, so container_of()
++	 * on NULL yields NULL, which "matches" an empty slot and turns
++	 * "switch not probed yet" into a silent no-connection instead of
++	 * -EPROBE_DEFER. The connector is then created permanently
++	 * without its switch and orientation never reaches the redriver
++	 * (dead DP AUX/SBU in one plug orientation on this rig).
++	 */
++	if (!dev)
++		return ERR_PTR(-EPROBE_DEFER);
++
+ 	/* Skip duplicates */
+ 	for (i = 0; i < TYPEC_MUX_MAX_DEVS; i++)
+ 		if (to_typec_switch_dev(dev) == sw_devs[i]) {
+@@ -65,7 +79,7 @@
+ 			return NULL;
+ 		}
+ 
+-	return dev ? to_typec_switch_dev(dev) : ERR_PTR(-EPROBE_DEFER);
++	return to_typec_switch_dev(dev);
+ }
+ 
+ /**
+@@ -79,7 +93,12 @@
+  */
+ struct typec_switch *fwnode_typec_switch_get(struct fwnode_handle *fwnode)
+ {
+-	struct typec_switch_dev *sw_devs[TYPEC_MUX_MAX_DEVS];
++	/*
++	 * ROCKNIX-GTK (ETK): zero-init -- the match callback's dedup loop
++	 * reads every slot before fwnode_connection_find_matches() has
++	 * filled them; stack garbage there can eat a valid switch.
++	 */
++	struct typec_switch_dev *sw_devs[TYPEC_MUX_MAX_DEVS] = {};
+ 	struct typec_switch *sw;
+ 	int count;
+ 	int err;
