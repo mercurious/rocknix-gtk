@@ -35,7 +35,10 @@ KTAR_SHA="f9fef3d14c0df53819026f4be74459835c2a0b0dcbf5b5bbd9ea19f0829402b3"
 RAW="https://raw.githubusercontent.com/ROCKNIX/distribution/$ROCKNIX_REF"
 API="https://api.github.com/repos/ROCKNIX/distribution/contents"
 
-log() { printf '[stage_72] %s\n' "$*"; }
+# log to stderr so command substitution capturing a function's numeric return
+# (fetch_patches) never swallows a progress line (the count-capture bug that
+# printed false "count != expected" WARNs on the first run — 2026-08-28).
+log() { printf '[stage_72] %s\n' "$*" >&2; }
 die() { printf '[stage_72] FATAL: %s\n' "$*" >&2; exit 1; }
 
 command -v docker >/dev/null || die "docker not found (run on the build node)"
