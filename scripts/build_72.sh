@@ -51,7 +51,11 @@ fi
   || die "staging/initramfs-stock-20260901.cpio missing — carve from the new stock KERNEL (scripts/extract_initramfs.py; K1 step 2)"
 [ -d /kernel/staging/external-firmware-20260901 ] \
   || die "staging/external-firmware-20260901/ missing — pull the 8 blobs (6 Qualcomm + regulatory.db + regulatory.db.p7s) from the migrated rig's /usr/lib/firmware (K1 step 2)"
-FWCOUNT=$(ls /kernel/staging/external-firmware-20260901 | wc -l)
+# Count files RECURSIVELY: the blobs are nested (qcom/sm8250/adsp.mbn, ...) so
+# a top-level `ls` sees only 3 entries (qcom/ + the two regulatory.db files)
+# and false-fails the gate (2026-08-28, first real 7.2 mint). CONFIG_EXTRA_
+# FIRMWARE references the nested relative paths, so the tree must stay nested.
+FWCOUNT=$(find /kernel/staging/external-firmware-20260901 -type f | wc -l)
 [ "$FWCOUNT" -ge 8 ] || die "external-firmware-20260901 has $FWCOUNT files, expected >=8 (regulatory.db + .p7s are NEW in 20260901 — CONFIG_EXTRA_FIRMWARE includes them when CONFIG_CFG80211=y)"
 
 # --- 1. Extract pristine tarball ---
