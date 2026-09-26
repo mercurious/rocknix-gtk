@@ -258,8 +258,12 @@ card up, sentry active. **#9: fix LIVE.**
   4.58 s. Same missing-error-case shape as Patch #2's vote path; boot-variable ADSP
   timing, no path from the charger driver. Candidate: fold a devote case into #2's
   upstream submission. Watch across the next cold boots, don't crown or convict on one.
-- Open: `tools/etk_drift.py` bank + one warm GT5P session → normal ledger row; one
-  charge to Full with battery `voltage_now` never above 4.40 V.
+- Drift gate DONE: `--check` no structural drift; `--diff` vs the 20260901 pin → only
+  Turnip 26.2.99 (devel, Sep 1) → 26.2.2 (v0.9.0 cert pin, Sep 3) — a driver change, not
+  a kernel effect (legible only after etk `1a08d06` stripped the RPCS3 log timestamp that
+  made every launch WARN). Banked as `20260901.json`, pin untouched.
+- Open: one warm GT5P session → normal ledger row; one charge to Full with battery
+  `voltage_now` never above 4.40 V.
 - Tooling found and fixed on the way (all in this repo): `build_72.sh` stamp would have
   skipped #9 on a remint; `stage_72.sh` nested staging on a stopped container; this
   gate hashed `/flash/KERNEL` (stock) and hard-coded 7.0.11, and printed a lone MATCH
