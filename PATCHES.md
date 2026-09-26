@@ -287,6 +287,8 @@ Each is kernel-image-only and preserves the module ABI (`uname -r` = `7.1.2`, un
   only** (applies clean to the 20260901 driver; body byte-identical to PR 0018). Acceptance =
   after a cold boot on the minted kernel, the same read-back shows `1061: 26` / `1070: 50`,
   plus a charge to Full with `voltage_now` never above 4.40 V. `build_72.sh` VERIFY fails the
-  lane if the fix is absent from the built tree. **PENDING mint + cold boot.**
+  lane if the fix is absent from the built tree. **LIVE 2026-09-26** in `20260901-0.5.1`
+  (sha `3cd2a297…`): operator cold boot → `1061: 26` / `1070: 50` (were `6b` / `7a` on 0.5
+  the same session). Open: the charge-to-Full voltage check. VALIDATION.md has the gate.
 - **Upstreamability:** it IS upstream's fix; our contribution is the Flip 2 read-back (the PR
   author only has an RP5) — operator posts it on #3382. Drop #9 once a tag carries 0018.

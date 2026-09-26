@@ -233,3 +233,37 @@ So a kernel-side "clone the panel to DP" is a feature port against missing hardw
 out of this lane's scope. The `Writeback-1` connector is real and usable for *capture* by a
 compositor-side consumer (a sway/wlroots lane, if ever). The supported posture stands:
 record-only capture is the capture path; wl-mirror becomes reliable as the P0/P1b fixes land.
+
+## 20260901-0.5.1 — #9 charger float voltage (2026-09-26)
+
+`KERNEL.rocknix-gtk-20260901-0.5.1` = certified `-0.5` + #9, same staging
+(`ROCKNIX_REF=20260901`; kernel inputs identical to the 13e18947 nightly ref),
+sha `3cd2a297…`, 59,726,336 B (same size as 0.5), `kernel.release` 7.2.0 (0.5
+parity), all 7 ETK patches applied, lane VERIFY `#9 … PRESENT`, patch-set
+fingerprint `c03f9248e8169f86`, drift = expected-class only.
+
+| read (regmap `0-02`) | 0.5 (before, same session) | 0.5.1 (operator cold boot) |
+|---|---|---|
+| `1070` FLOAT_VOLTAGE_CFG | `7a` = 4.82 V target | **`50` = 4.40 V** |
+| `1061` FAST_CHARGE_CURRENT_CFG | `6b` = 5.35 A | **`26` = 1.90 A** |
+
+Mechanical gate (`scripts/validate_gate.sh`, read-only, fresh boot): booted
+`KERNEL.gtktest` sha MATCH, build `#2 … Sep 26 22:58 UTC`, keepalive cmdline `=1`
++ param `Y`, 51 loaded / 269 shipped modules (= 0.5), grub fallbacks intact, audio
+card up, sentry active. **#9: fix LIVE.**
+
+- dmesg delta vs the 0.5 snapshot: `q6afe … cmd = 0x100f6 returned error = 0x1` +
+  `Unknown cmd 0x100f6` (×2, t=3.88 s). 0x100f6 = `…HW_DEVOTE_REQUEST`, sent
+  fire-and-forget (`apr_send_pkt`, no waiter) — log-only, no timeout, card up at
+  4.58 s. Same missing-error-case shape as Patch #2's vote path; boot-variable ADSP
+  timing, no path from the charger driver. Candidate: fold a devote case into #2's
+  upstream submission. Watch across the next cold boots, don't crown or convict on one.
+- Open: `tools/etk_drift.py` bank + one warm GT5P session → normal ledger row; one
+  charge to Full with battery `voltage_now` never above 4.40 V.
+- Tooling found and fixed on the way (all in this repo): `build_72.sh` stamp would have
+  skipped #9 on a remint; `stage_72.sh` nested staging on a stopped container; this
+  gate hashed `/flash/KERNEL` (stock) and hard-coded 7.0.11, and printed a lone MATCH
+  when its main block never ran.
+- Reverse-orientation ladder above: `.11`'s "redriver told correctly" is FALSIFIED —
+  there is no nb7vpq904m on Retroid boards (ROCKNIX `e4461cfea5`); see
+  `UPSTREAM_20261001.md` §3.

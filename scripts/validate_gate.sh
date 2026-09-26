@@ -37,6 +37,14 @@ ssh "$RIG" "$BOOTED"'
   echo "--- dmesg error sweep (first 15)"
   dmesg | grep -iE "fail|error|panic" | grep -viE "thermal|EDID|deferred" | head -15
 '
+RC=$?
+# ssh exits 255 on its OWN failure (mDNS miss, timeout). A later ssh can then
+# succeed and print a lone MATCH -- a partial run that read as a pass
+# (2026-09-26, first 0.5.1 gate). No main block = no verdict.
+if [ "$RC" -eq 255 ]; then
+  echo "GATE INCOMPLETE: $RIG unreachable for the main block -- re-run (or RIG=root@169.254.170.2)"
+  exit 2
+fi
 if [ -n "$EXPECTED_SHA" ]; then
   LIVE_SHA=$(ssh "$RIG" "$BOOTED"'; sha256sum "/flash/$K"' | cut -d' ' -f1)
   if [ "$LIVE_SHA" = "$EXPECTED_SHA" ]; then echo "BOOTED KERNEL SHA: MATCH ($LIVE_SHA)"; else echo "BOOTED KERNEL SHA: MISMATCH live=$LIVE_SHA expected=$EXPECTED_SHA"; fi
