@@ -11,6 +11,8 @@ q6afe audio-probe-race root fix.
 `PATCHES.md` → `VALIDATION.md` → `groundtruth/` (the staging byte-parity evidence).
 For the 20260901 chassis lane: `UPSTREAM_20260901.md` (K1 prep — upstream deltas since
 20260801, surveyed 2026-08-21, with the release-day execution order).
+For the 20261001 lane: `UPSTREAM_20261001.md` (K2 prep — SM8250 moved GRUB → `qcom-abl`;
+the GTK kernel becomes a boot.img; surveyed 2026-09-26).
 
 ## How artifacts flow (never deviate)
 1. **Mint**: `~/etk/forge.sh kernel` conducts `~/etk/tools/forge/lane_kernel.sh` on **etk-cloud**
