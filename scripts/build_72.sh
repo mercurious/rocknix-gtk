@@ -2,7 +2,8 @@
 # ROCKNIX-GTK Tier-K kernel pipeline — 7.2 / ROCKNIX 20260901 rebase lane.
 # Same contract as build_712.sh (7.1.2 lane, kept intact until the 7.2 kernel
 # is cold-boot validated + certified): mainline tarball + ROCKNIX patch stack
-# + rig-ground-truth config + ETK patches (patches-7.2/, SIX active — #6
+# + rig-ground-truth config + ETK patches (patches-7.2/, SEVEN active — #9
+# pm8150b-charger-float-voltage added 2026-09-26 (battery safety); #6
 # dp-bounded-enable-lock is DROPPED on 7.2: upstream removed event_mutex from
 # dp_display.c entirely, the lock this patch bounds no longer exists; #4 is
 # switch-side only, upstream removed the buggy mux-side dedup loop).
@@ -58,7 +59,19 @@ fi
 FWCOUNT=$(find /kernel/staging/external-firmware-20260901 -type f | wc -l)
 [ "$FWCOUNT" -ge 8 ] || die "external-firmware-20260901 has $FWCOUNT files, expected >=8 (regulatory.db + .p7s are NEW in 20260901 — CONFIG_EXTRA_FIRMWARE includes them when CONFIG_CFG80211=y)"
 
-# --- 1. Extract pristine tarball ---
+# --- 1. Extract pristine tarball — fresh whenever the staged patch set changed.
+#        The tree persists in the container volume; the stamp used to be a bare
+#        `touch`, so a remint after a patch-set change logged "patches already
+#        applied" and rebuilt the OLD source while reporting success (caught
+#        while staging #9, 2026-09-26). A tree is valid only if its stamp equals
+#        the fingerprint of what is staged now (names + order + content). ---
+PSET=$(cd /kernel/staging/patches-72 && find . -name '*.patch' | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -c1-16)
+[ -n "$PSET" ] || die "could not fingerprint staging/patches-72"
+if [ -d "$SRC" ] && [ "$(cat "$SRC/.etk-patches-applied" 2>/dev/null)" != "$PSET" ]; then
+  log "tree stamp '$(cat "$SRC/.etk-patches-applied" 2>/dev/null || echo none)' != staged patch set $PSET — re-extracting pristine"
+  [ -f linux-$KVER.tar.xz ] || die "patch set changed but linux-$KVER.tar.xz is missing — refusing to reuse a stale tree (fetch the tarball)"
+  rm -rf "$SRC" || die "could not remove stale tree $SRC"
+fi
 if [ ! -d "$SRC" ]; then
   log "extracting linux-$KVER.tar.xz ..."
   tar xf linux-$KVER.tar.xz || die "tarball extract failed"
@@ -73,7 +86,7 @@ log "SUBLEVEL: $(grep '^SUBLEVEL' "$SRC/Makefile")"
 cp -r /kernel/staging/dts-device-20260901/* "$SRC/arch/arm64/boot/dts/" || die "dts copy failed"
 
 # --- 3. Patch stack in scripts/unpack order: mainline -> 7.2 -> device
-#        SM8250 -> 04-etk (SIX patches; see patches-7.2/ and PATCHES.md) ---
+#        SM8250 -> 04-etk (SEVEN patches; see patches-7.2/ and PATCHES.md) ---
 if [ ! -f "$SRC/.etk-patches-applied" ]; then
   for d in 01-mainline 02-72 03-device 04-etk; do
     [ -d /kernel/staging/patches-72/$d ] || continue
@@ -87,9 +100,9 @@ if [ ! -f "$SRC/.etk-patches-applied" ]; then
       fi
     done
   done
-  touch "$SRC/.etk-patches-applied"
+  echo "$PSET" > "$SRC/.etk-patches-applied"
 else
-  log "patches already applied (stamp present)"
+  log "patches already applied (stamp matches staged set $PSET)"
 fi
 
 # --- 4. Config = live-rig 20260901 /proc/config.gz ground truth, with only
@@ -128,3 +141,10 @@ echo "kernel.release: $(cat "$OUT/include/config/kernel.release")"
 ls -la "$OUT/arch/arm64/boot/Image"
 echo "modules built: $(find "$OUT" -name '*.ko' | wc -l)"
 strings "$OUT/arch/arm64/boot/Image" | grep -m1 "Linux version"
+echo "patch set: $PSET"
+# #9 is a battery-safety patch: the lane FAILS if the tree lacks it. Checks the
+# code, not the patch source, so it stays true if upstream absorbs #3382.
+grep -q 'clamp(chip->batt_info->voltage_max_design_uv, 3600000, 4450000)' \
+    "$SRC/drivers/power/supply/qcom_pm8150b_charger.c" \
+  && echo "#9 pm8150b float-voltage fix: PRESENT" \
+  || die "#9 pm8150b float-voltage fix MISSING from the built tree"

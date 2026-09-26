@@ -3,6 +3,10 @@
 Discrete patches over the reconstructed ROCKNIX `7.1.2` SM8250 tree (see `BUILDING.md`).
 Each is kernel-image-only and preserves the module ABI (`uname -r` = `7.1.2`, unchanged).
 
+> **2026-09-26:** `patches-7.2/` gains **#9 `pm8150b-charger-float-voltage`** (battery
+> safety, carried from ROCKNIX PR #3382 — seven active). K2 survey (SM8250 → `qcom-abl`,
+> the redriver phantom that retires #5): `UPSTREAM_20261001.md`.
+>
 > **7.2 / ROCKNIX 20260901 status (2026-08-28):** upstream bumps SM8250 to kernel
 > **7.2**. The rebased set lives in **`patches-7.2/`** (six active, verified zero-fuzz
 > against real v7.2 sources, pristine and layered over ROCKNIX's own `7.2/0010`):
@@ -255,3 +259,34 @@ Each is kernel-image-only and preserves the module ABI (`uname -r` = `7.1.2`, un
   re-audit outcome.
 - **Upstreamability:** on hold until the re-audit; the V3 word-size mechanism remains the
   correct upstream shape once the regression is understood. Disclosed as AI-assisted.
+
+### Patch #9 — `pm8150b-charger-float-voltage`: charge the 4.40 V cell to 4.40 V, not 4.82 V
+- **File:** `drivers/power/supply/qcom_pm8150b_charger.c` (created by ROCKNIX device patch
+  `0011-qcom-pm8150b-charger`; ours applies after it) — `patches-7.2/0009-...`.
+- **Provenance:** carried **verbatim** from ROCKNIX PR #3382 file `0018` (xenocideend, with
+  Claude Opus 5.5; combined by Jacob Cook), open at carry time. Authorship preserved in the
+  patch header. Not an ETK-original fix — we carry it because the driver is
+  `CONFIG_CHARGER_QCOM_SMB5=y` (built-in), so it rides the kernel image **we** ship, and
+  the battery can't wait on upstream's merge timing.
+- **The problem it solves:** `0011` derives `FLOAT_VOLTAGE_CFG` with the **PMI8998** scale
+  (3.4875 V + 7.5 mV/step — the driver's Kconfig help still says "PMI8998") on a
+  **PM8150B** (3.6 V + 10 mV/step), and never writes `FAST_CHARGE_CURRENT_CFG`. Present in
+  every ROCKNIX SM8250 build since the 2025-07 import, including our certified `20260901-0.5`.
+  **Flip 2 read-back, 2026-09-26** (regmap debugfs `0-02`, operator-run): `1070: 7a`
+  (4.82 V target for a `voltage-max-design` 4.40 V cell), `1061: 6b` (5.35 A) —
+  byte-identical to the PR author's RP5.
+- **What it does:** float = `clamp(voltage_max_design, 3.60–4.45 V)` on the 10 mV scale;
+  charge current = `constant-charge-current-max`, else `min(charge_full_design/2, 3 A)`.
+  Flip 2 battery node → **`0x50` (4.40 V)** and **`0x26` (1.90 A, 0.5C of 3850 mAh)**.
+- **Why it's safe:** probe-time register init only; no knob, no ABI. Expected side effect:
+  top-of-charge takes longer on a PD charger (1.9 A cap; the old 5.35 A was input-limited
+  on 5 V anyway). Review note for upstream: if a board sets **neither**
+  `constant-charge-current-max` nor `charge-full-design`, `charge_full_design_uah` is
+  `-EINVAL` and the fallback programs **0 A** (no charging) — not reachable on Flip 2.
+- **Verdict (honest):** the defect is **measured on our rig**; the fix is **static-verified
+  only** (applies clean to the 20260901 driver; body byte-identical to PR 0018). Acceptance =
+  after a cold boot on the minted kernel, the same read-back shows `1061: 26` / `1070: 50`,
+  plus a charge to Full with `voltage_now` never above 4.40 V. `build_72.sh` VERIFY fails the
+  lane if the fix is absent from the built tree. **PENDING mint + cold boot.**
+- **Upstreamability:** it IS upstream's fix; our contribution is the Flip 2 read-back (the PR
+  author only has an RP5) — operator posts it on #3382. Drop #9 once a tag carries 0018.

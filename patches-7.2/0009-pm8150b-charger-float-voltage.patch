@@ -1,0 +1,43 @@
+ETK-GTK patch #9 -- pm8150b-charger-float-voltage
+Carried verbatim from ROCKNIX PR #3382 file 0018 (open at carry time, 2026-09-26):
+https://github.com/ROCKNIX/distribution/pull/3382 -- authorship preserved below.
+Applies after ROCKNIX device patch 0011-qcom-pm8150b-charger (identical 20260901..next).
+
+ROCKNIX 0011 programs FLOAT_VOLTAGE_CFG with the PMI8998 scale (3.4875 V +
+7.5 mV/step) on a PM8150B (3.6 V + 10 mV/step) and never writes
+FAST_CHARGE_CURRENT_CFG. Flip 2 read-back on 20260901-0.5 (2026-09-26):
+0x1070 = 0x7a (4.82 V target for a 4.40 V cell), 0x1061 = 0x6b (5.35 A).
+With this patch the Flip 2 battery node yields 0x50 (4.40 V) and 0x26
+(1.90 A = 0.5C fallback from charge-full-design 3850 mAh).
+
+From: xenocideend (with Claude Opus 5.5) <xenocideend@gmail.com>
+Subject: [PATCH] power: supply: qcom_pm8150b_charger: fix float voltage and
+ charge current
+
+---
+--- a/drivers/power/supply/qcom_pm8150b_charger.c
++++ b/drivers/power/supply/qcom_pm8150b_charger.c
+@@ -884,12 +884,22 @@
+ 		return dev_err_probe(chip->dev, rc,
+ 				     "Failed to init status change work\n");
+ 
+-	rc = (chip->batt_info->voltage_max_design_uv - 3487500) / 7500 + 1;
++	rc = clamp(chip->batt_info->voltage_max_design_uv, 3600000, 4450000);
++	rc = (rc - 3600000) / 10000;
+ 	rc = regmap_update_bits(chip->regmap, chip->base + FLOAT_VOLTAGE_CFG,
+ 				FLOAT_VOLTAGE_SETTING_MASK, rc);
+ 	if (rc < 0)
+ 		return dev_err_probe(chip->dev, rc, "Couldn't set vbat max\n");
+ 
++	rc = chip->batt_info->constant_charge_current_max_ua;
++	if (rc <= 0)
++		rc = min(chip->batt_info->charge_full_design_uah / 2, 3000000);
++	rc = regmap_update_bits(chip->regmap,
++				chip->base + FAST_CHARGE_CURRENT_CFG,
++				FAST_CHARGE_CURRENT_SETTING_MASK, rc / 50000);
++	if (rc < 0)
++		return dev_err_probe(chip->dev, rc, "Couldn't set charge current\n");
++
+ 	rc = smb5_init_irq(chip, &irq, "bat-ov", smb5_handle_batt_overvoltage);
+ 	if (rc < 0)
+ 		return rc;

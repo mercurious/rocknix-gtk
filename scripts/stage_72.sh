@@ -15,7 +15,7 @@
 #   patches-72/01-mainline (4)  <- packages/linux/patches/mainline
 #   patches-72/02-72      (3)   <- packages/linux/patches/7.2
 #   patches-72/03-device  (28)  <- devices/SM8250/patches/linux
-#   patches-72/04-etk     (6)   <- THIS repo's patches-7.2/  (the ETK stack)
+#   patches-72/04-etk     (7)   <- THIS repo's patches-7.2/  (the ETK stack)
 #   dts-device-<date>/qcom      <- devices/SM8250/linux/dts/qcom
 #   linux-7.2.tar.xz            <- kernel.org (sha-pinned)
 # Rig-GROUND-TRUTH inputs (pre-place in $GT before running — pulled from the
@@ -43,6 +43,12 @@ die() { printf '[stage_72] FATAL: %s\n' "$*" >&2; exit 1; }
 
 command -v docker >/dev/null || die "docker not found (run on the build node)"
 docker inspect "$CONTAINER" >/dev/null 2>&1 || die "container $CONTAINER not present"
+# RUNNING, not just present: on a stopped container the old-staging wipe below
+# failed silently and `docker cp` of each dir onto its surviving predecessor
+# NESTED the new set (patches-72/patches-72/...) under the stale one, while the
+# script still printed STAGING ASSEMBLED (2026-09-26, node restarted).
+[ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null)" = "true" ] \
+  || die "container $CONTAINER is present but NOT RUNNING — docker start $CONTAINER, then re-run"
 [ -d "$REPO/patches-7.2" ] || die "$REPO/patches-7.2 missing — pull the K1 commits (git -C $REPO fetch && reset --hard origin/main)"
 
 # --- ground truth present? (fail LOUD with the step that produces each) ---
@@ -90,7 +96,7 @@ ND=$(fetch_patches "projects/ROCKNIX/devices/SM8250/patches/linux"    "$S/patche
 mkdir -p "$S/patches-72/04-etk"
 cp "$REPO"/patches-7.2/*.patch "$S/patches-72/04-etk/" || die "copy patches-7.2 failed"
 NE=$(find "$S/patches-72/04-etk" -name '*.patch' | wc -l)
-[ "$NE" = "6" ] || log "WARN: ETK patch count $NE != expected 6 (#6 dropped on 7.2)"
+[ "$NE" = "7" ] || log "WARN: ETK patch count $NE != expected 7 (#6 dropped on 7.2; #9 added 2026-09-26)"
 log "  04-etk: $NE ETK patches"
 
 # --- 3. device DTS overlay ---
@@ -122,19 +128,24 @@ log "  linux-7.2.tar.xz sha OK"
 
 # --- 6. push into the container volume (/kernel) ---
 log "copying into $CONTAINER:/kernel ..."
-docker exec "$CONTAINER" sh -c 'rm -rf /kernel/staging/patches-72 /kernel/staging/dts-device-'"$BASEDATE"' /kernel/staging/external-firmware-'"$BASEDATE"'' 2>/dev/null
-docker cp "$S/patches-72"                    "$CONTAINER:/kernel/staging/patches-72"
-docker cp "$S/dts-device-$BASEDATE"          "$CONTAINER:/kernel/staging/dts-device-$BASEDATE"
-docker cp "$S/config-7.2-rig.txt"            "$CONTAINER:/kernel/staging/config-7.2-rig.txt"
-docker cp "$S/initramfs-stock-$BASEDATE.cpio" "$CONTAINER:/kernel/staging/initramfs-stock-$BASEDATE.cpio"
-docker cp "$S/external-firmware-$BASEDATE"    "$CONTAINER:/kernel/staging/external-firmware-$BASEDATE"
-docker cp "$KTAR"                            "$CONTAINER:/kernel/linux-7.2.tar.xz"
+dcp() { docker cp "$1" "$2" || die "docker cp $1 -> $2 failed"; }
+docker exec "$CONTAINER" sh -c 'rm -rf /kernel/staging/patches-72 /kernel/staging/dts-device-'"$BASEDATE"' /kernel/staging/external-firmware-'"$BASEDATE"'' \
+  || die "could not clear the old staging in $CONTAINER (a surviving dir makes docker cp nest the new one inside it)"
+dcp "$S/patches-72"                    "$CONTAINER:/kernel/staging/patches-72"
+dcp "$S/dts-device-$BASEDATE"          "$CONTAINER:/kernel/staging/dts-device-$BASEDATE"
+dcp "$S/config-7.2-rig.txt"            "$CONTAINER:/kernel/staging/config-7.2-rig.txt"
+dcp "$S/initramfs-stock-$BASEDATE.cpio" "$CONTAINER:/kernel/staging/initramfs-stock-$BASEDATE.cpio"
+dcp "$S/external-firmware-$BASEDATE"    "$CONTAINER:/kernel/staging/external-firmware-$BASEDATE"
+dcp "$KTAR"                            "$CONTAINER:/kernel/linux-7.2.tar.xz"
 
 # --- 7. in-container completeness gate (what build_72.sh will read) ---
 log "=== staging verification (in-container) ==="
 docker exec "$CONTAINER" sh -c '
   set -e
   cd /kernel
+  for d in staging/patches-72/patches-72 staging/dts-device-'"$BASEDATE"'/dts-device-'"$BASEDATE"' staging/external-firmware-'"$BASEDATE"'/external-firmware-'"$BASEDATE"'; do
+    [ ! -e "$d" ] || { echo "NESTED staging dir: $d"; exit 1; }
+  done
   echo "patches: mainline=$(ls staging/patches-72/01-mainline/*.patch 2>/dev/null | wc -l) 7.2=$(ls staging/patches-72/02-72/*.patch 2>/dev/null | wc -l) device=$(ls staging/patches-72/03-device/*.patch 2>/dev/null | wc -l) etk=$(ls staging/patches-72/04-etk/*.patch 2>/dev/null | wc -l)"
   echo "dts: $(find staging/dts-device-'"$BASEDATE"'/qcom -type f 2>/dev/null | wc -l) files"
   echo "config: $([ -f staging/config-7.2-rig.txt ] && echo present || echo MISSING) ($(grep -c . staging/config-7.2-rig.txt 2>/dev/null) lines)"
@@ -142,6 +153,6 @@ docker exec "$CONTAINER" sh -c '
   echo "firmware: $(find staging/external-firmware-'"$BASEDATE"' -type f 2>/dev/null | wc -l) files"
   echo "tarball: $([ -f linux-7.2.tar.xz ] && echo present || echo MISSING)"
   echo "LSUI parity note: build_72.sh drops the ARM64_LSUI disable (stock 7.2 ships =y); config has: $(grep "^CONFIG_ARM64_LSUI" staging/config-7.2-rig.txt || echo "not set")"
-'
+' || die "in-container staging verification FAILED — nothing above is trustworthy"
 log "STAGING ASSEMBLED. Next: the OPERATOR mints (bytes-to-atoms):"
-log "  FORGE_KERNEL_BUILD=72 FORGE_KERNEL_DATE=<date> FORGE_KERNEL_VER=0.5 ./forge.sh kernel"
+log "  FORGE_KERNEL_BUILD=72 FORGE_KERNEL_DATE=<date> FORGE_KERNEL_VER=<ver> ./forge.sh kernel"
