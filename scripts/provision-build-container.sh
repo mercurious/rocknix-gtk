@@ -98,7 +98,15 @@ docker exec "${CONTAINER}" bash -lc '
 
 echo ">> Syncing staging into /kernel"
 docker exec "${CONTAINER}" bash -lc '
-  rsync -a --delete /work/staging/ /kernel/staging/
+  # An EMPTY host staging/ is the normal state on a node fed by stage_72.sh,
+  # which docker-cps straight into /kernel/staging. --delete from an empty dir
+  # wiped those inputs on every re-provision (found in the 2026-10-04 etk-cloud
+  # rebuild audit). Mirror only when the host side actually holds a staging set.
+  if [ -n "\$(ls -A /work/staging 2>/dev/null)" ]; then
+    rsync -a --delete /work/staging/ /kernel/staging/
+  else
+    echo "   host staging/ empty -- leaving /kernel/staging as is (stage_72.sh feeds it)"
+  fi
   # The build scripts extract the tarball from /kernel, not /kernel/staging.
   for t in /kernel/staging/linux-*.tar.xz; do
     [ -e "\$t" ] || continue
