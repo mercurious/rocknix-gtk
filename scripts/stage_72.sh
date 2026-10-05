@@ -129,6 +129,9 @@ log "  linux-7.2.tar.xz sha OK"
 # --- 6. push into the container volume (/kernel) ---
 log "copying into $CONTAINER:/kernel ..."
 dcp() { docker cp "$1" "$2" || die "docker cp $1 -> $2 failed"; }
+# mkdir -p: on a FRESH volume /kernel/staging does not exist, and docker cp to
+# a path under a missing parent fails ("Could not find the file /kernel/staging")
+docker exec "$CONTAINER" mkdir -p /kernel/staging || die "could not create /kernel/staging in $CONTAINER"
 docker exec "$CONTAINER" sh -c 'rm -rf /kernel/staging/patches-72 /kernel/staging/dts-device-'"$BASEDATE"' /kernel/staging/external-firmware-'"$BASEDATE"'' \
   || die "could not clear the old staging in $CONTAINER (a surviving dir makes docker cp nest the new one inside it)"
 dcp "$S/patches-72"                    "$CONTAINER:/kernel/staging/patches-72"

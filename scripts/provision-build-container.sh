@@ -102,6 +102,10 @@ docker exec "${CONTAINER}" bash -lc '
   # which docker-cps straight into /kernel/staging. --delete from an empty dir
   # wiped those inputs on every re-provision (found in the 2026-10-04 etk-cloud
   # rebuild audit). Mirror only when the host side actually holds a staging set.
+  # mkdir FIRST: the --delete rsync below used to be the only thing that ever
+  # created /kernel/staging, so skipping it left a fresh volume without the dir
+  # and stage_72.sh'"'"'s docker cp died (2026-10-05, first fresh-node run).
+  mkdir -p /kernel/staging
   if [ -n "\$(ls -A /work/staging 2>/dev/null)" ]; then
     rsync -a --delete /work/staging/ /kernel/staging/
   else
