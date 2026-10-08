@@ -35,6 +35,12 @@ CFG_GT="$STG/config-7.2-rig$SFX.txt"
 # boot.img and the keepalive moves from install time to mint time. UPSTREAM_20261001.md.
 BOOTIMG="${BOOTIMG:-$([ "$BASEDATE" -ge 20261001 ] && echo 1 || echo 0)}"
 ETK_CMDLINE="${ETK_CMDLINE:-msm.context_keepalive=1 panic=30}"
+# Kit DTB splice at mint (ABL era: the DTBs ride inside the boot.img). ETK_KIT_DTB=0
+# mints a pure-parity image (no splice); ETK_INTERNAL_MIC=0 drops the mic delta only.
+# The splicer is etk's bin/etk_dtb_mic.py, staged by lane_kernel.sh (docker cp) --
+# never a copy kept in this repo.
+ETK_KIT_DTB="${ETK_KIT_DTB:-1}"
+ETK_INTERNAL_MIC="${ETK_INTERNAL_MIC:-1}"
 REF_KERNEL="$STG/KERNEL.stock-$BASEDATE"
 
 # gcc-15 is the VALIDATED compiler (15.3.0 built every shipping artifact). Do not
@@ -84,6 +90,10 @@ if [ "$BOOTIMG" = 1 ]; then
   [ -f "$REF_KERNEL" ] || die "staging/KERNEL.stock-$BASEDATE missing — the boot.img lane packs against the STOCK KERNEL (header fields, cmdline, DTB order): stage it from the migrated rig's /flash/KERNEL"
   python3 -I /work/scripts/bootimg_parity.py fields "$REF_KERNEL" >/dev/null || die "KERNEL.stock-$BASEDATE is not a readable boot.img"
   command -v mkbootimg >/dev/null || die "mkbootimg missing in the container — re-run provision-build-container.sh (it installs mkbootimg)"
+  if [ "$ETK_KIT_DTB" = 1 ]; then
+    [ -f "$STG/etk_dtb_mic.py" ] || die "staging/etk_dtb_mic.py missing — lane_kernel.sh stages it from the node's ~/etk (ETK_KIT_DTB=0 for a pure-parity mint)"
+    python3 -I "$STG/etk_dtb_mic.py" >/dev/null 2>&1 || [ $? = 2 ] || die "staging/etk_dtb_mic.py does not run"
+  fi
 fi
 PSET=$(cd $PDIR && find . -name '*.patch' | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -c1-16)
 [ -n "$PSET" ] || die "could not fingerprint staging/patches-72"
@@ -203,7 +213,15 @@ if [ "$BOOTIMG" = 1 ]; then
     DTB_FILES="$DTB_FILES $OUT/arch/arm64/boot/dts/$d"
   done
   echo "=== BOOT.IMG (qcom-abl) ==="
-  bash /work/scripts/pack_bootimg.sh "$OUT/arch/arm64/boot/Image" "$REF_KERNEL" "$ETK_CMDLINE" \
+  KIT_ENV=""
+  if [ "$ETK_KIT_DTB" = 1 ]; then
+    KIT_ENV="KIT_DTB_TOOL=$STG/etk_dtb_mic.py"
+    [ "$ETK_INTERNAL_MIC" = 1 ] || KIT_ENV="$KIT_ENV KIT_DTB_FLAGS=--no-mic"
+    echo "kit DTB splice: ON (mic=$ETK_INTERNAL_MIC) via $STG/etk_dtb_mic.py sha $(sha256sum "$STG/etk_dtb_mic.py" | cut -c1-16)"
+  else
+    echo "kit DTB splice: OFF (ETK_KIT_DTB=0) — pure-parity mint"
+  fi
+  env $KIT_ENV bash /work/scripts/pack_bootimg.sh "$OUT/arch/arm64/boot/Image" "$REF_KERNEL" "$ETK_CMDLINE" \
        "$OUT/arch/arm64/boot/boot.img" $DTB_FILES \
     || die "boot.img packaging/parity FAILED — nothing to ship"
   grep -q "msm.context_keepalive=1" <(python3 -I /work/scripts/bootimg_parity.py show "$OUT/arch/arm64/boot/boot.img") \

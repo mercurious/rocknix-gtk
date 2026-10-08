@@ -10,7 +10,13 @@ Upstream recipe: projects/ROCKNIX/packages/linux/package.mk (makeinstall_target)
   fields REF                 print the reference's header values as shell vars
                              (build_72.sh feeds mkbootimg from stock, not constants)
   check  REF CAND --extra S  CAND must equal REF in every field that matters,
-                             with cmdline == REF cmdline + " " + S exactly
+                             with cmdline == REF cmdline + " " + S exactly, and every
+                             DTB byte-identical to stock -- EXCEPT the kit DTBs:
+         --kit-models "A|B"  root models whose DTB carries the ETK kit splice (mic,
+                             USB-C VBUS: etk_dtb_mic.py). Those MUST differ from stock
+                             and, with --kit-check <etk_dtb_mic.py>, must report
+                             DTB_MIC_PATCHED. A kit model found byte-identical, or a
+                             non-kit model found different, is a PARITY FAIL.
   show   IMG                 human summary of one image
 
 Exit 0 = parity, 1 = a mismatch (each printed as PARITY FAIL), 2 = unreadable.
@@ -129,7 +135,21 @@ def cmd_show(img):
         print(f"  WARNING: {h['trailing_junk']} trailing bytes after the last DTB")
 
 
-def cmd_check(ref, cand, extra):
+def kit_check(tool, blob):
+    """etk_dtb_mic.py check <blob> -> 'PATCHED' | 'STOCK' | 'FAIL <why>'."""
+    import subprocess, tempfile, os
+    fd, path = tempfile.mkstemp(suffix='.dtb'); os.write(fd, blob); os.close(fd)
+    try:
+        out = subprocess.run([sys.executable, '-I', tool, 'check', path], capture_output=True, text=True)
+    finally:
+        os.unlink(path)
+    txt = (out.stdout + out.stderr).strip()
+    if 'DTB_MIC_PATCHED' in txt: return 'PATCHED'
+    if 'DTB_MIC_STOCK' in txt: return 'STOCK'
+    return 'FAIL ' + txt.splitlines()[-1] if txt else 'FAIL (no output)'
+
+
+def cmd_check(ref, cand, extra, kit_models=(), kit_tool=None):
     r, c = load(ref), load(cand)
     fails, notes = [], []
     def same(key, label=None):
@@ -156,9 +176,25 @@ def cmd_check(ref, cand, extra):
                      + '\n'.join(f'      ref[{i}] {m}' for i, (m, _) in enumerate(rm)) + '\n'
                      + '\n'.join(f'      cand[{i}] {m}' for i, (m, _) in enumerate(cm)))
     else:
-        ident = sum(1 for (a, *_), (b, *_) in zip(r['dtbs'], c['dtbs']) if a == b)
-        notes.append(f'dtbs: {len(cm)} in stock order; {ident}/{len(cm)} byte-identical to stock'
-                     + ('' if ident == len(cm) else ' (dtc/source drift — inspect before a cold boot)'))
+        # STRICT (2026-10-08): with DTC_FLAGS=-@ the recipe reproduces stock's DTBs
+        # byte-for-byte, so any non-kit difference is a real drift -> FAIL. Kit DTBs
+        # (the models named) must differ AND verify as patched by the splicer.
+        ident, kit = 0, []
+        for (a, am, _ac), (b, _bm, _bc) in zip(r['dtbs'], c['dtbs']):
+            if am in kit_models:
+                if a == b:
+                    fails.append(f'dtbs: kit model "{am}" is byte-identical to stock (the kit splice did not happen)')
+                    continue
+                verdict = kit_check(kit_tool, b) if kit_tool else 'unverified'
+                if verdict not in ('PATCHED', 'unverified'):
+                    fails.append(f'dtbs: kit model "{am}" differs from stock but is not a kit DTB: {verdict}')
+                kit.append(f'{am} [{verdict}]')
+            elif a == b:
+                ident += 1
+            else:
+                fails.append(f'dtbs: "{am}" differs from stock and is not a kit model (source/dtc drift)')
+        notes.append(f'dtbs: {len(cm)} in stock order; {ident}/{len(cm) - len(kit_models)} non-kit byte-identical to stock'
+                     + (f'; kit: {", ".join(kit)}' if kit else ''))
     notes.append(f"kernel: {c['linux_version']}")
     for n in notes:
         print(f'PARITY NOTE: {n}')
@@ -176,11 +212,15 @@ def main(argv):
     if len(argv) >= 3 and argv[1] == 'show':
         cmd_show(argv[2]); return 0
     if len(argv) >= 4 and argv[1] == 'check':
-        extra = ''
-        if '--extra' in argv:
-            i = argv.index('--extra')
-            extra = argv[i + 1] if i + 1 < len(argv) else die('--extra needs a value')
-        return cmd_check(argv[2], argv[3], extra)
+        def opt(name, default=''):
+            if name in argv:
+                i = argv.index(name)
+                return argv[i + 1] if i + 1 < len(argv) else die(f'{name} needs a value')
+            return default
+        extra = opt('--extra')
+        kit_models = tuple(m for m in opt('--kit-models').split('|') if m)
+        kit_tool = opt('--kit-check') or None
+        return cmd_check(argv[2], argv[3], extra, kit_models, kit_tool)
     print(__doc__.strip())
     return 2
 
