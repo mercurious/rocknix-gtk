@@ -164,7 +164,13 @@ if [ "$BOOTIMG" = 1 ]; then
   log "boot.img lane: DTBs (stock order):$DTB_TARGETS"
 fi
 log "building Image + modules${DTB_TARGETS:+ + dtbs} with $($KCC --version | head -1) ..."
-if $MAKE Image modules $DTB_TARGETS > /kernel/build72$SFX.log 2>&1; then
+# DTC_FLAGS=-@ : ROCKNIX's linux package.mk builds every DTB with symbols
+#        (`DTC_FLAGS=-@ kernel_make ...`), which also makes dtc emit a phandle for
+#        every labelled node. Without it the 0.6 mint packed DTBs that were
+#        semantically identical to stock but 0/9 byte-identical (~47 KB smaller
+#        each, no __symbols__ node) -- the parity gate could only say "inspect".
+#        With it the gate's DTB note is the proof: 9/9 byte-identical.
+if $MAKE DTC_FLAGS=-@ Image modules $DTB_TARGETS > /kernel/build72$SFX.log 2>&1; then
   log "BUILD OK"
 else
   echo "=== last 60 lines of build72$SFX.log ==="
