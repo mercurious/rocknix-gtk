@@ -41,6 +41,18 @@ ETK_CMDLINE="${ETK_CMDLINE:-msm.context_keepalive=1 panic=30}"
 # never a copy kept in this repo.
 ETK_KIT_DTB="${ETK_KIT_DTB:-1}"
 ETK_INTERNAL_MIC="${ETK_INTERNAL_MIC:-1}"
+# BOOT LOGO (ABL era, 2026-10-08): stock 20261001 ships CONFIG_TYPEC_MUX_GPIO_SBU=m and
+# the 20261001 DTS routes the USB-C connector's orientation/mode switch through that
+# gpio-sbu-mux (e4461cfea5 retired the phantom nb7vpq904m, which was =y). The connector
+# defers until udev loads the module from the rootfs AFTER switch_root, DP waits on the
+# connector, and the msm master (DSI+DP+GPU) binds at ~3.9 s -- but init's load_splash
+# runs at ~2.2 s, so rocknix-splash opens a /dev/fb0 that does not exist yet (GRUB era:
+# msm bound at ~1.2 s, logo fine). Upstream fixed it on main six days after the tag --
+# ROCKNIX 187eb24f2e "sm8250: fix splash at boot" = this one config line -- so we carry
+# that commit as a CONFIG DELTA over the rig ground truth. The rig's ground truth stays
+# =m (it IS the rig); the drift log shows exactly this line. ETK_GPIO_SBU_BUILTIN=0 =
+# pure-parity mint (the A/B arm that reproduces the missing logo).
+ETK_GPIO_SBU_BUILTIN="${ETK_GPIO_SBU_BUILTIN:-1}"
 REF_KERNEL="$STG/KERNEL.stock-$BASEDATE"
 
 # gcc-15 is the VALIDATED compiler (15.3.0 built every shipping artifact). Do not
@@ -152,13 +164,24 @@ cp $CFG_GT "$OUT/.config"
 "$SRC/scripts/config" --file "$OUT/.config" \
   --set-str CONFIG_INITRAMFS_SOURCE "$STG/initramfs-stock-$BASEDATE.cpio" \
   --set-str CONFIG_EXTRA_FIRMWARE_DIR "$STG/external-firmware-$BASEDATE"
+# Boot-logo fix (see ETK_GPIO_SBU_BUILTIN above): upstream 187eb24f2e, carried as a config
+# delta on the boot.img lane only (the 20260901 GRUB-era chassis binds msm early anyway).
+SPLASH_FIX=0
+if [ "$BOOTIMG" = 1 ] && [ "$ETK_GPIO_SBU_BUILTIN" = 1 ]; then
+  "$SRC/scripts/config" --file "$OUT/.config" --enable CONFIG_TYPEC_MUX_GPIO_SBU
+  SPLASH_FIX=1
+  log "boot-logo fix: CONFIG_TYPEC_MUX_GPIO_SBU=y (upstream 187eb24f2e) -- expect it in the drift"
+else
+  log "boot-logo fix: OFF (BOOTIMG=$BOOTIMG ETK_GPIO_SBU_BUILTIN=$ETK_GPIO_SBU_BUILTIN) -- stock =m, logo missing on 20261001 is EXPECTED"
+fi
 
 MAKE="make -C $SRC O=$OUT ARCH=arm64 CC=$KCC HOSTCC=$KCC KBUILD_BUILD_HOST=rocknix-gtk -j6"
 
 # --- 5. olddefconfig + drift check against ground truth ---
 $MAKE olddefconfig > /tmp/olddefconfig.log 2>&1 || { cat /tmp/olddefconfig.log; die "olddefconfig failed"; }
 diff $CFG_GT "$OUT/.config" > /kernel/config72$SFX.drift
-log "config drift vs rig ground truth (expect only INITRAMFS/FIRMWARE paths + toolchain-probe lines):"
+DRIFT_NOTE=""; [ "$SPLASH_FIX" = 1 ] && DRIFT_NOTE=" + the one TYPEC_MUX_GPIO_SBU m->y line (boot-logo fix)"
+log "config drift vs rig ground truth (expect only INITRAMFS/FIRMWARE paths + toolchain-probe lines$DRIFT_NOTE):"
 cat /kernel/config72$SFX.drift
 
 # --- 6. The build (Image + modules [+ the device DTBs on the boot.img lane]) ---
@@ -201,6 +224,17 @@ grep -q 'clamp(chip->batt_info->voltage_max_design_uv, 3600000, 4450000)' \
     "$SRC/drivers/power/supply/qcom_pm8150b_charger.c" \
   && echo "#9 pm8150b float-voltage fix: PRESENT" \
   || die "#9 pm8150b float-voltage fix MISSING from the built tree"
+# Boot-logo fix: the gate is the BUILT config, not the request -- olddefconfig could
+# silently drop a symbol whose deps moved. Built-in means no gpio-sbu-mux.ko either.
+if [ "$SPLASH_FIX" = 1 ]; then
+  grep -q '^CONFIG_TYPEC_MUX_GPIO_SBU=y$' "$OUT/.config" \
+    || die "boot-logo fix requested but CONFIG_TYPEC_MUX_GPIO_SBU is not =y in the built config"
+  [ -z "$(find "$OUT" -name 'gpio-sbu-mux.ko' -print -quit)" ] \
+    || die "boot-logo fix requested but gpio-sbu-mux.ko was still built as a module"
+  echo "boot-logo fix (gpio-sbu-mux built-in, upstream 187eb24f2e): PRESENT"
+else
+  echo "boot-logo fix: OFF -- stock CONFIG_TYPEC_MUX_GPIO_SBU=m (pure parity)"
+fi
 
 # --- 8. qcom-abl packaging (boot.img lane only) — the artifact the ABL boots ---
 #        pack_bootimg.sh mirrors ROCKNIX's makeinstall_target (gzip Image + DTBs, 5-byte

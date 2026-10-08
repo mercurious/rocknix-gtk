@@ -3,6 +3,14 @@
 Discrete patches over the reconstructed ROCKNIX `7.1.2` SM8250 tree (see `BUILDING.md`).
 Each is kernel-image-only and preserves the module ABI (`uname -r` = `7.1.2`, unchanged).
 
+> **2026-10-08 — a CONFIG DELTA, not a patch:** the boot.img lane (`BASEDATE` ≥ 20261001)
+> sets `CONFIG_TYPEC_MUX_GPIO_SBU=y` over the rig ground truth (`=m`), carrying upstream
+> ROCKNIX `187eb24f2e` "sm8250: fix splash at boot": with the mux a module, the USB-C
+> connector defers past `switch_root`, msm binds at ~3.9 s and the ROCKNIX boot logo is
+> drawn into a `/dev/fb0` that does not exist yet. Knob `ETK_GPIO_SBU_BUILTIN` (default
+> ON); VERIFY gates on the built config. Kernel-image-only, module ABI unchanged (one
+> fewer loadable module). `UPSTREAM_20261001.md` §3a.
+>
 > **2026-09-26:** `patches-7.2/` gains **#9 `pm8150b-charger-float-voltage`** (battery
 > safety, carried from ROCKNIX PR #3382 — seven active). K2 survey (SM8250 → `qcom-abl`,
 > the redriver phantom that retires #5): `UPSTREAM_20261001.md`.

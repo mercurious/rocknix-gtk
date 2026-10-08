@@ -271,3 +271,22 @@ card up, sentry active. **#9: fix LIVE.**
 - Reverse-orientation ladder above: `.11`'s "redriver told correctly" is FALSIFIED —
   there is no nb7vpq904m on Retroid boards (ROCKNIX `e4461cfea5`); see
   `UPSTREAM_20261001.md` §3.
+
+## 20261001-0.6.3 — boot logo (gpio-sbu-mux built-in) — PENDING operator cold boot
+
+`KERNEL.rocknix-gtk-20261001-0.6.3` = 0.6.2 + the `CONFIG_TYPEC_MUX_GPIO_SBU=y` config
+delta (upstream ROCKNIX `187eb24f2e`; `UPSTREAM_20261001.md` §3a). Nothing else changes:
+same patch set, same DTB splice, same cmdline.
+
+Gate (car12, cold boot through `install.sh`):
+- the ROCKNIX logo on the glass before ES (the operator's screen is the verdict);
+- `dmesg | grep -E "mmcblk0p2\): mounted|bound ae94000.dsi|msmdrmfb"` — `bound
+  ae94000.dsi` precedes the `mounted` line (GRUB-era reference 1.13–1.26 s; 20261001 stock
+  3.90 s);
+- `ls /sys/bus/platform/drivers/gpio_sbu_mux/` shows the bound device, `lsmod` lacks
+  `gpio_sbu_mux` (50 loaded, was 51); a `dmesg` "Driver 'gpio_sbu_mux' is already
+  registered" line is expected noise, not a fault;
+- `scripts/validate_gate.sh` otherwise identical to 0.6.2 (keepalive `Y`, 120 Hz, audio,
+  Internal Mic in the booted DT).
+Falsifier: `=y` live and msm still bound after `load_splash` → the deferral chain was
+misread; fallback = an init-side wait for `/dev/fb0` (upstream `load_splash`).
