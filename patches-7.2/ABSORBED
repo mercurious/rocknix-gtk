@@ -1,0 +1,6 @@
+# ETK patches that upstream ROCKNIX absorbed — stage_72.sh skips a listed patch when
+# BASEDATE >= its first absorbed chassis (older lanes keep carrying it).
+# A listed patch's EFFECT must still be checked in-tree by build_72.sh (#9: the
+# clamp() grep in step 7), so "absorbed" can never silently mean "lost".
+# <first-basedate> <patch-file> <evidence>
+20261001 0009-pm8150b-charger-float-voltage.patch PR#3382 folded into devices/SM8250/patches/linux/0011-qcom-pm8150b-charger.patch @ tag 20261001 (all 11 added lines incl. both FAST_CHARGE_CURRENT_CFG writes present; verified 2026-10-08)

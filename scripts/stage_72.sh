@@ -107,8 +107,20 @@ ND=$(fetch_patches "projects/ROCKNIX/devices/SM8250/patches/linux"    "$S/$PD/03
 # --- 2. ETK stack (this repo) -> 04-etk ---
 mkdir -p "$S/$PD/04-etk"
 cp "$REPO"/patches-7.2/*.patch "$S/$PD/04-etk/" || die "copy patches-7.2 failed"
+# patches-7.2/ABSORBED: "<first-basedate> <patch> <evidence>" — upstream carries it from
+# that chassis on, so carrying ours too fails as "previously applied" (20261001: #9).
+NABS=0
+if [ -f "$REPO/patches-7.2/ABSORBED" ]; then
+    while read -r since pf evidence; do
+        case "$since" in ''|\#*) continue ;; esac
+        if [ "$BASEDATE" -ge "$since" ] && [ -f "$S/$PD/04-etk/$pf" ]; then
+            rm -f "$S/$PD/04-etk/$pf"; NABS=$((NABS+1))
+            log "  04-etk: skipping $pf (absorbed upstream since $since: $evidence)"
+        fi
+    done < "$REPO/patches-7.2/ABSORBED"
+fi
 NE=$(find "$S/$PD/04-etk" -name '*.patch' | wc -l)
-[ "$NE" = "7" ] || log "WARN: ETK patch count $NE != expected 7 (#6 dropped on 7.2; #9 added 2026-09-26)"
+[ "$NE" = "$((7 - NABS))" ] || log "WARN: ETK patch count $NE != expected $((7 - NABS)) (7 carried on 7.2, minus $NABS absorbed upstream)"
 log "  04-etk: $NE ETK patches"
 
 # --- 3. device DTS overlay ---

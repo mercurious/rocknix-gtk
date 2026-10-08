@@ -292,3 +292,9 @@ Each is kernel-image-only and preserves the module ABI (`uname -r` = `7.1.2`, un
   the same session). Open: the charge-to-Full voltage check. VALIDATION.md has the gate.
 - **Upstreamability:** it IS upstream's fix; our contribution is the Flip 2 read-back (the PR
   author only has an RP5) — operator posts it on #3382. Drop #9 once a tag carries 0018.
+- **ABSORBED upstream at tag 20261001 (verified 2026-10-08):** #3382 was folded into
+  ROCKNIX's own `0011-qcom-pm8150b-charger.patch` (all 11 added lines, incl. both
+  `FAST_CHARGE_CURRENT_CFG` writes), so ours fails as "previously applied" on that stack.
+  `patches-7.2/ABSORBED` makes `stage_72.sh` skip it for BASEDATE >= 20261001; the 20260901
+  lane still carries it. `build_72.sh` step 7 keeps checking the clamp IN THE TREE, so the
+  fix is verified present either way.
