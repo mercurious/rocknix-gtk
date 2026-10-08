@@ -19,8 +19,23 @@ log() { echo "[build_72] $*"; }
 die() { echo "[build_72] FATAL: $*"; exit 1; }
 
 KVER="${KVER:-7.2}"
-SRC=/kernel/linux-$KVER
-OUT="${OUT:-/kernel/out72}"
+BASEDATE="${BASEDATE:-20260901}"
+# One rule shared with stage_72.sh: the shipping 20260901 lane keeps its historic
+# un-suffixed paths (byte-for-byte the recipe it always was); a newer chassis stages,
+# extracts and builds side by side under -<BASEDATE>, so the certified kernel can
+# always be reminted while the next one bakes.
+if [ "$BASEDATE" = 20260901 ]; then SFX=""; else SFX="-$BASEDATE"; fi
+SRC=/kernel/linux-$KVER$SFX
+OUT="${OUT:-/kernel/out72$SFX}"
+STG=/kernel/staging
+PDIR="$STG/patches-72$SFX"
+CFG_GT="$STG/config-7.2-rig$SFX.txt"
+# qcom-abl era (ROCKNIX 20261001+): /flash/KERNEL is an Android boot.img with the DTBs
+# inside and the cmdline baked in (the ABL appends nothing), so the deliverable is a
+# boot.img and the keepalive moves from install time to mint time. UPSTREAM_20261001.md.
+BOOTIMG="${BOOTIMG:-$([ "$BASEDATE" -ge 20261001 ] && echo 1 || echo 0)}"
+ETK_CMDLINE="${ETK_CMDLINE:-msm.context_keepalive=1 panic=30}"
+REF_KERNEL="$STG/KERNEL.stock-$BASEDATE"
 
 # gcc-15 is the VALIDATED compiler (15.3.0 built every shipping artifact). Do not
 # default to gcc-14: it produces a kernel that compiles clean, verifies clean, and
@@ -42,22 +57,22 @@ fi
 #        UPSTREAM_20260901.md "K1 execution order".)
 [ -f /kernel/linux-$KVER.tar.xz ] || [ -d "$SRC" ] \
   || die "linux-$KVER.tar.xz missing — fetch the mainline tarball (NEVER git: LOCALVERSION_AUTO would break the module-ABI law)"
-[ -d /kernel/staging/dts-device-20260901 ] \
-  || die "staging/dts-device-20260901/ missing — rsync devices/SM8250 DTS from the ROCKNIX 20260901 tag (K1 step 3)"
-[ -d /kernel/staging/patches-72/01-mainline ] \
-  || die "staging/patches-72/ missing — export mainline/7.2/device stacks from the 20260901 tag + patches-7.2/ as 04-etk (K1 step 3)"
-[ -f /kernel/staging/config-7.2-rig.txt ] \
+[ -d $STG/dts-device-$BASEDATE ] \
+  || die "staging/dts-device-$BASEDATE/ missing — stage_72.sh with BASEDATE=$BASEDATE (rsyncs devices/SM8250 DTS from the tag)"
+[ -d $PDIR/01-mainline ] \
+  || die "$PDIR/ missing — stage_72.sh with BASEDATE=$BASEDATE (mainline/7.2/device stacks + patches-7.2/ as 04-etk)"
+[ -f $CFG_GT ] \
   || die "staging/config-7.2-rig.txt missing — pull /proc/config.gz from the MIGRATED rig (K1 step 2; repo conf is a recipe input, the rig is ground truth)"
-[ -f /kernel/staging/initramfs-stock-20260901.cpio ] \
-  || die "staging/initramfs-stock-20260901.cpio missing — carve from the new stock KERNEL (scripts/extract_initramfs.py; K1 step 2)"
-[ -d /kernel/staging/external-firmware-20260901 ] \
-  || die "staging/external-firmware-20260901/ missing — pull the 8 blobs (6 Qualcomm + regulatory.db + regulatory.db.p7s) from the migrated rig's /usr/lib/firmware (K1 step 2)"
+[ -f $STG/initramfs-stock-$BASEDATE.cpio ] \
+  || die "staging/initramfs-stock-$BASEDATE.cpio missing — carve from the new stock KERNEL (scripts/extract_initramfs.py; K1 step 2)"
+[ -d $STG/external-firmware-$BASEDATE ] \
+  || die "staging/external-firmware-$BASEDATE/ missing — pull the 8 blobs (6 Qualcomm + regulatory.db + regulatory.db.p7s) from the migrated rig's /usr/lib/firmware (K1 step 2)"
 # Count files RECURSIVELY: the blobs are nested (qcom/sm8250/adsp.mbn, ...) so
 # a top-level `ls` sees only 3 entries (qcom/ + the two regulatory.db files)
 # and false-fails the gate (2026-08-28, first real 7.2 mint). CONFIG_EXTRA_
 # FIRMWARE references the nested relative paths, so the tree must stay nested.
-FWCOUNT=$(find /kernel/staging/external-firmware-20260901 -type f | wc -l)
-[ "$FWCOUNT" -ge 8 ] || die "external-firmware-20260901 has $FWCOUNT files, expected >=8 (regulatory.db + .p7s are NEW in 20260901 — CONFIG_EXTRA_FIRMWARE includes them when CONFIG_CFG80211=y)"
+FWCOUNT=$(find $STG/external-firmware-$BASEDATE -type f | wc -l)
+[ "$FWCOUNT" -ge 8 ] || die "external-firmware-$BASEDATE has $FWCOUNT files, expected >=8 (regulatory.db + .p7s are NEW in 20260901 — CONFIG_EXTRA_FIRMWARE includes them when CONFIG_CFG80211=y)"
 
 # --- 1. Extract pristine tarball — fresh whenever the staged patch set changed.
 #        The tree persists in the container volume; the stamp used to be a bare
@@ -65,7 +80,12 @@ FWCOUNT=$(find /kernel/staging/external-firmware-20260901 -type f | wc -l)
 #        applied" and rebuilt the OLD source while reporting success (caught
 #        while staging #9, 2026-09-26). A tree is valid only if its stamp equals
 #        the fingerprint of what is staged now (names + order + content). ---
-PSET=$(cd /kernel/staging/patches-72 && find . -name '*.patch' | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -c1-16)
+if [ "$BOOTIMG" = 1 ]; then
+  [ -f "$REF_KERNEL" ] || die "staging/KERNEL.stock-$BASEDATE missing — the boot.img lane packs against the STOCK KERNEL (header fields, cmdline, DTB order): stage it from the migrated rig's /flash/KERNEL"
+  python3 -I /work/scripts/bootimg_parity.py fields "$REF_KERNEL" >/dev/null || die "KERNEL.stock-$BASEDATE is not a readable boot.img"
+  command -v mkbootimg >/dev/null || die "mkbootimg missing in the container — re-run provision-build-container.sh (it installs mkbootimg)"
+fi
+PSET=$(cd $PDIR && find . -name '*.patch' | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -c1-16)
 [ -n "$PSET" ] || die "could not fingerprint staging/patches-72"
 if [ -d "$SRC" ] && [ "$(cat "$SRC/.etk-patches-applied" 2>/dev/null)" != "$PSET" ]; then
   log "tree stamp '$(cat "$SRC/.etk-patches-applied" 2>/dev/null || echo none)' != staged patch set $PSET — re-extracting pristine"
@@ -73,8 +93,14 @@ if [ -d "$SRC" ] && [ "$(cat "$SRC/.etk-patches-applied" 2>/dev/null)" != "$PSET
   rm -rf "$SRC" || die "could not remove stale tree $SRC"
 fi
 if [ ! -d "$SRC" ]; then
-  log "extracting linux-$KVER.tar.xz ..."
-  tar xf linux-$KVER.tar.xz || die "tarball extract failed"
+  log "extracting linux-$KVER.tar.xz -> $SRC ..."
+  if [ -z "$SFX" ]; then
+    tar xf linux-$KVER.tar.xz || die "tarball extract failed"
+  else
+    rm -rf "/kernel/x$SFX" && mkdir -p "/kernel/x$SFX" \
+      && tar xf linux-$KVER.tar.xz -C "/kernel/x$SFX" \
+      && mv "/kernel/x$SFX/linux-$KVER" "$SRC" && rmdir "/kernel/x$SFX" || die "tarball extract failed"
+  fi
 fi
 grep -q "^VERSION = 7$" "$SRC/Makefile" || die "unexpected kernel VERSION"
 grep -q "^PATCHLEVEL = 2$" "$SRC/Makefile" || die "unexpected kernel PATCHLEVEL"
@@ -83,14 +109,14 @@ log "SUBLEVEL: $(grep '^SUBLEVEL' "$SRC/Makefile")"
 # --- 2. Device DTS overlay (mirrors package.mk DTS_SOURCE_DIR rsync;
 #        20260901 dts carries the 9998-gpu-tuning chassis: 305-925 MHz OPP
 #        ladder + ACD + GPU->DDR bandwidth voting — rides the DTB, not Image) ---
-cp -r /kernel/staging/dts-device-20260901/* "$SRC/arch/arm64/boot/dts/" || die "dts copy failed"
+cp -r $STG/dts-device-$BASEDATE/* "$SRC/arch/arm64/boot/dts/" || die "dts copy failed"
 
 # --- 3. Patch stack in scripts/unpack order: mainline -> 7.2 -> device
 #        SM8250 -> 04-etk (SEVEN patches; see patches-7.2/ and PATCHES.md) ---
 if [ ! -f "$SRC/.etk-patches-applied" ]; then
   for d in 01-mainline 02-72 03-device 04-etk; do
-    [ -d /kernel/staging/patches-72/$d ] || continue
-    for p in /kernel/staging/patches-72/$d/*.patch; do
+    [ -d $PDIR/$d ] || continue
+    for p in $PDIR/$d/*.patch; do
       [ -e "$p" ] || continue
       if patch -p1 -N --no-backup-if-mismatch -d "$SRC" < "$p" > /tmp/patch.log 2>&1; then
         log "applied: $d/$(basename "$p")"
@@ -112,27 +138,38 @@ fi
 #        ours does too), so the rig ground truth already carries =y and
 #        parity means leaving it alone. Inert on this silicon (no FEAT_LSUI).
 mkdir -p "$OUT"
-cp /kernel/staging/config-7.2-rig.txt "$OUT/.config"
+cp $CFG_GT "$OUT/.config"
 "$SRC/scripts/config" --file "$OUT/.config" \
-  --set-str CONFIG_INITRAMFS_SOURCE "/kernel/staging/initramfs-stock-20260901.cpio" \
-  --set-str CONFIG_EXTRA_FIRMWARE_DIR "/kernel/staging/external-firmware-20260901"
+  --set-str CONFIG_INITRAMFS_SOURCE "$STG/initramfs-stock-$BASEDATE.cpio" \
+  --set-str CONFIG_EXTRA_FIRMWARE_DIR "$STG/external-firmware-$BASEDATE"
 
 MAKE="make -C $SRC O=$OUT ARCH=arm64 CC=$KCC HOSTCC=$KCC KBUILD_BUILD_HOST=rocknix-gtk -j6"
 
 # --- 5. olddefconfig + drift check against ground truth ---
 $MAKE olddefconfig > /tmp/olddefconfig.log 2>&1 || { cat /tmp/olddefconfig.log; die "olddefconfig failed"; }
-diff /kernel/staging/config-7.2-rig.txt "$OUT/.config" > /kernel/config72.drift
+diff $CFG_GT "$OUT/.config" > /kernel/config72$SFX.drift
 log "config drift vs rig ground truth (expect only INITRAMFS/FIRMWARE paths + toolchain-probe lines):"
-cat /kernel/config72.drift
+cat /kernel/config72$SFX.drift
 
-# --- 6. The build (Image + modules) ---
-log "building Image + modules with $($KCC --version | head -1) ..."
-if $MAKE Image modules > /kernel/build72.log 2>&1; then
+# --- 6. The build (Image + modules [+ the device DTBs on the boot.img lane]) ---
+#        DTB set = every staged device .dts, C-sorted: that IS stock's order ('-' < '.'
+#        puts each -visionox before its base board), the same qcom/<name>.dtb make
+#        targets ROCKNIX passes via get_kernel_make_extracmd.
+DTB_TARGETS=""
+if [ "$BOOTIMG" = 1 ]; then
+  for f in $(cd $STG/dts-device-$BASEDATE/qcom && LC_ALL=C ls *.dts); do
+    DTB_TARGETS="$DTB_TARGETS qcom/${f%.dts}.dtb"
+  done
+  [ -n "$DTB_TARGETS" ] || die "no .dts in staging/dts-device-$BASEDATE/qcom"
+  log "boot.img lane: DTBs (stock order):$DTB_TARGETS"
+fi
+log "building Image + modules${DTB_TARGETS:+ + dtbs} with $($KCC --version | head -1) ..."
+if $MAKE Image modules $DTB_TARGETS > /kernel/build72$SFX.log 2>&1; then
   log "BUILD OK"
 else
-  echo "=== last 60 lines of build72.log ==="
-  tail -60 /kernel/build72.log
-  die "kernel build FAILED (full log: /kernel/build72.log)"
+  echo "=== last 60 lines of build72$SFX.log ==="
+  tail -60 /kernel/build72$SFX.log
+  die "kernel build FAILED (full log: /kernel/build72$SFX.log)"
 fi
 
 # --- 7. Verification summary ---
@@ -148,3 +185,22 @@ grep -q 'clamp(chip->batt_info->voltage_max_design_uv, 3600000, 4450000)' \
     "$SRC/drivers/power/supply/qcom_pm8150b_charger.c" \
   && echo "#9 pm8150b float-voltage fix: PRESENT" \
   || die "#9 pm8150b float-voltage fix MISSING from the built tree"
+
+# --- 8. qcom-abl packaging (boot.img lane only) — the artifact the ABL boots ---
+#        pack_bootimg.sh mirrors ROCKNIX's makeinstall_target (gzip Image + DTBs, 5-byte
+#        "dummy" ramdisk, mkbootimg v0) with every header field and the base cmdline taken
+#        from the STOCK KERNEL, appends ETK_CMDLINE, and ends in the parity gate.
+if [ "$BOOTIMG" = 1 ]; then
+  DTB_FILES=""
+  for d in $DTB_TARGETS; do
+    [ -f "$OUT/arch/arm64/boot/dts/$d" ] || die "built DTB missing: $d"
+    DTB_FILES="$DTB_FILES $OUT/arch/arm64/boot/dts/$d"
+  done
+  echo "=== BOOT.IMG (qcom-abl) ==="
+  bash /work/scripts/pack_bootimg.sh "$OUT/arch/arm64/boot/Image" "$REF_KERNEL" "$ETK_CMDLINE" \
+       "$OUT/arch/arm64/boot/boot.img" $DTB_FILES \
+    || die "boot.img packaging/parity FAILED — nothing to ship"
+  grep -q "msm.context_keepalive=1" <(python3 -I /work/scripts/bootimg_parity.py show "$OUT/arch/arm64/boot/boot.img") \
+    || die "boot.img cmdline lacks msm.context_keepalive=1 — the anti-lock would be lost silently"
+  echo "boot.img: $OUT/arch/arm64/boot/boot.img (cmdline + '$ETK_CMDLINE')"
+fi

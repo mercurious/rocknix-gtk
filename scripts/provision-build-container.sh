@@ -40,8 +40,10 @@ REPO_DIR="${REPO_DIR:-}"
 # The dep set is not guessed — it is dpkg-query from the container that has been
 # producing shipped kernels. gcc-15 rides alongside sid's default compiler; the
 # build scripts pin CC to it deliberately (see the toolchain law in BUILDING.md).
+# mkbootimg: the qcom-abl boot.img lane (K2, 20261001+) packs the Android v0 image
+# the ROCKNIX ABL boots (scripts/pack_bootimg.sh); added 2026-10-08.
 PKGS="bc bison build-essential cpio flex gcc-15 kmod libelf-dev libssl-dev
-      python3 rsync xz-utils"
+      mkbootimg python3 rsync xz-utils"
 PKGS="$(printf '%s' "$PKGS" | tr -s '[:space:]' ' ')"
 
 host_sh() {
