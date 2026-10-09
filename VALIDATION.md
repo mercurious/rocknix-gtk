@@ -272,7 +272,15 @@ card up, sentry active. **#9: fix LIVE.**
   there is no nb7vpq904m on Retroid boards (ROCKNIX `e4461cfea5`); see
   `UPSTREAM_20261001.md` §3.
 
-## 20261001-0.6.3 — boot logo (gpio-sbu-mux built-in) — PENDING operator cold boot
+## 20261001-0.6.3 — boot logo (gpio-sbu-mux built-in) — VALIDATED 2026-10-08 (car12 cold boot)
+
+**Verdict:** operator saw the ROCKNIX logo on the glass; `tools/abl_slot.sh verify` 11/11: msm
+bound `ae94000.dsi` at **1.21 s** BEFORE the root mount at **1.84 s** (0.6.2: 3.83 s after 2.17 s),
+**50 modules**, `gpio_sbu_mux builtin`, keepalive `Y`, 120 Hz, audio. Artifact sha
+`7254032f524af4fdd80d747fbeeca11c57d34957541ac05163ac27736442cf2d` (28,778,496 B). The first
+mint died on VERIFY's `find` for a stale `gpio-sbu-mux.ko` from the 0.6.2 incremental build;
+the gate now reads `modules.order`/`modules.builtin` (14d4bb8, cacc259). **Certified ABL
+kernel for October = 0.6.3.**
 
 `KERNEL.rocknix-gtk-20261001-0.6.3` = 0.6.2 + the `CONFIG_TYPEC_MUX_GPIO_SBU=y` config
 delta (upstream ROCKNIX `187eb24f2e`; `UPSTREAM_20261001.md` §3a). Nothing else changes:
