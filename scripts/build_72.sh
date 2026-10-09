@@ -215,7 +215,15 @@ fi
 echo "=== VERIFY ==="
 echo "kernel.release: $(cat "$OUT/include/config/kernel.release")"
 ls -la "$OUT/arch/arm64/boot/Image"
-echo "modules built: $(find "$OUT" -name '*.ko' | wc -l)"
+# modules.order is what modules_install ships; a `find -name '*.ko'` also counts STALE
+# objects an incremental rebuild left behind (2026-10-08: the 0.6.3 remint kept 0.6.2's
+# gpio-sbu-mux.ko on disk after the symbol went =y and the old gate died on it).
+STALE=$(find "$OUT" -name '*.ko' | sed "s|^$OUT/||" | grep -vxF -f "$OUT/modules.order" || true)
+if [ -n "$STALE" ]; then
+  echo "pruning stale .ko not in modules.order:"; echo "$STALE" | sed 's/^/  /'
+  echo "$STALE" | while read -r f; do rm -f "$OUT/$f"; done
+fi
+echo "modules built: $(wc -l < "$OUT/modules.order") (modules.order)"
 strings "$OUT/arch/arm64/boot/Image" | grep -m1 "Linux version"
 echo "patch set: $PSET"
 # #9 is a battery-safety patch: the lane FAILS if the tree lacks it. Checks the
@@ -225,12 +233,15 @@ grep -q 'clamp(chip->batt_info->voltage_max_design_uv, 3600000, 4450000)' \
   && echo "#9 pm8150b float-voltage fix: PRESENT" \
   || die "#9 pm8150b float-voltage fix MISSING from the built tree"
 # Boot-logo fix: the gate is the BUILT config, not the request -- olddefconfig could
-# silently drop a symbol whose deps moved. Built-in means no gpio-sbu-mux.ko either.
+# silently drop a symbol whose deps moved. Built-in = modules.builtin lists it and
+# modules.order does not (NOT a find for the .ko: an incremental rebuild leaves the old one).
 if [ "$SPLASH_FIX" = 1 ]; then
   grep -q '^CONFIG_TYPEC_MUX_GPIO_SBU=y$' "$OUT/.config" \
     || die "boot-logo fix requested but CONFIG_TYPEC_MUX_GPIO_SBU is not =y in the built config"
-  [ -z "$(find "$OUT" -name 'gpio-sbu-mux.ko' -print -quit)" ] \
-    || die "boot-logo fix requested but gpio-sbu-mux.ko was still built as a module"
+  grep -q 'gpio-sbu-mux.ko' "$OUT/modules.order" \
+    && die "boot-logo fix requested but modules.order still lists gpio-sbu-mux.ko (built as a module)"
+  grep -q 'gpio-sbu-mux' "$OUT/modules.builtin" \
+    || die "boot-logo fix requested but modules.builtin does not list gpio-sbu-mux"
   echo "boot-logo fix (gpio-sbu-mux built-in, upstream 187eb24f2e): PRESENT"
 else
   echo "boot-logo fix: OFF -- stock CONFIG_TYPEC_MUX_GPIO_SBU=m (pure parity)"
