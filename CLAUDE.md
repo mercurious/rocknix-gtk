@@ -32,3 +32,5 @@ the GTK kernel becomes a boot.img; surveyed 2026-09-26).
 - Always-reboot gate; stock is always one grub pick away — never remove the fallback entry.
 - Trunk-based: work on `main`, push same session; never force-push.
 - Public artifacts under the **mercurious** pseudonym; docs stay development/tuning-focused.
+
+@AGENTS.md
