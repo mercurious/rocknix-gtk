@@ -63,7 +63,8 @@ ETK_GPIO_SBU_BUILTIN="${ETK_GPIO_SBU_BUILTIN:-1}"
 #   pretimeout governors      bark plumbing (qcom-wdt has set_pretimeout; bark IRQ wired), noop default
 #   DEBUG_KERNEL + soft/hard  lockup detectors, LOG-ONLY (BOOTPARAM_*_PANIC stay off), with
 #     lockup detectors        watchdog_thresh=2 -> hard 2 s / soft 4 s, inside the ~6.5 s window
-#   ARM64_PSEUDO_NMI          + the cmdline switch: a live core can backtrace one spinning with IRQs off
+#   (NOT pseudo-NMI, NOT the hung-task detector: see the MODULE-ABI GUARD below -- 0.6.4.1 was
+#    minted with both and REJECTED before install, 2026-10-11)
 #   PSTORE_RAM=y + CONSOLE    ramoops in reserve_mem: the console log lives in RAM; GT5's death is a
 #                             WARM reset (PMIC warm_reset=PS_HOLD) and RAM survival across a WARM
 #                             reset was never tested (2026-07-02 falsified it on COLD Linux-panic
@@ -71,7 +72,7 @@ ETK_GPIO_SBU_BUILTIN="${ETK_GPIO_SBU_BUILTIN:-1}"
 # Default 0: every certified mint is unchanged. NOT for release.
 ETK_FORENSICS="${ETK_FORENSICS:-0}"
 if [ "$ETK_FORENSICS" = 1 ]; then
-  ETK_CMDLINE="$ETK_CMDLINE irqchip.gicv3_pseudo_nmi=1 watchdog_thresh=2 sysctl.kernel.hardlockup_all_cpu_backtrace=1 sysctl.kernel.softlockup_all_cpu_backtrace=1 reserve_mem=2M:4096:etk_ramoops ramoops.mem_name=etk_ramoops ramoops.record_size=0x40000 ramoops.console_size=0x80000 ramoops.max_reason=2 efi_pstore.pstore_disable=1"
+  ETK_CMDLINE="$ETK_CMDLINE watchdog_thresh=2 sysctl.kernel.hardlockup_all_cpu_backtrace=1 sysctl.kernel.softlockup_all_cpu_backtrace=1 reserve_mem=2M:4096:etk_ramoops ramoops.mem_name=etk_ramoops ramoops.record_size=0x40000 ramoops.console_size=0x80000 ramoops.max_reason=2 efi_pstore.pstore_disable=1"
 fi
 REF_KERNEL="$STG/KERNEL.stock-$BASEDATE"
 
@@ -208,19 +209,33 @@ if [ "$ETK_FORENSICS" = 1 ]; then
     --enable CONFIG_HARDLOCKUP_DETECTOR_PREFER_BUDDY \
     --disable CONFIG_BOOTPARAM_SOFTLOCKUP_PANIC \
     --disable CONFIG_BOOTPARAM_HARDLOCKUP_PANIC \
-    --enable CONFIG_ARM64_PSEUDO_NMI \
+    --disable CONFIG_DETECT_HUNG_TASK \
+    --disable CONFIG_DETECT_HUNG_TASK_BLOCKER \
+    --disable CONFIG_ARM64_PSEUDO_NMI \
     --enable CONFIG_PSTORE_RAM \
     --enable CONFIG_PSTORE_CONSOLE
-  log "FORENSICS kernel: wdt sysfs + pretimeout govs, log-only lockup detectors, pseudo-NMI, ramoops console -- expect them (and DEBUG_KERNEL's defaults) in the drift; cmdline + '$ETK_CMDLINE'"
+  log "FORENSICS kernel: wdt sysfs + pretimeout govs, log-only lockup detectors, ramoops console -- expect them (and DEBUG_KERNEL's ABI-neutral defaults) in the drift; cmdline + '$ETK_CMDLINE'"
 fi
 
 MAKE="make -C $SRC O=$OUT ARCH=arm64 CC=$KCC HOSTCC=$KCC KBUILD_BUILD_HOST=rocknix-gtk -j6"
 
 # --- 5. olddefconfig + drift check against ground truth ---
 $MAKE olddefconfig > /tmp/olddefconfig.log 2>&1 || { cat /tmp/olddefconfig.log; die "olddefconfig failed"; }
+# MODULE-ABI GUARD (2026-10-11): ABL-era kits ship only the boot.img; the modules come from
+# ROCKNIX's stock system image, built for the stock config, and CONFIG_MODVERSIONS is OFF -- a
+# layout drift corrupts memory silently instead of refusing to load. 0.6.4.1 (the first
+# FORENSICS mint) let DEBUG_KERNEL pull in DETECT_HUNG_TASK(+_BLOCKER), which adds fields mid-
+# task_struct (sched.h last_switch_count/time, blocker) and to struct semaphore (last_holder),
+# and enabled ARM64_PSEUDO_NMI (PMR vs the stock modules' DAIF masking). Any of these =y while
+# the stock config has it off fails the mint.
+for sym in DETECT_HUNG_TASK DETECT_HUNG_TASK_BLOCKER ARM64_PSEUDO_NMI DEBUG_LOCK_ALLOC LOCKDEP DEBUG_SPINLOCK DEBUG_MUTEXES KASAN; do
+  if grep -q "^CONFIG_$sym=y" "$OUT/.config" && ! grep -q "^CONFIG_$sym=y" $CFG_GT; then
+    die "MODULE-ABI GUARD: CONFIG_$sym=y but the rig's stock modules were built without it (struct layouts / irq masking differ, MODVERSIONS off)"
+  fi
+done
 diff $CFG_GT "$OUT/.config" > /kernel/config72$SFX.drift
 DRIFT_NOTE=""; [ "$SPLASH_FIX" = 1 ] && DRIFT_NOTE=" + the one TYPEC_MUX_GPIO_SBU m->y line (boot-logo fix)"
-[ "$ETK_FORENSICS" = 1 ] && DRIFT_NOTE="$DRIFT_NOTE + the FORENSICS block (wdt/lockup/NMI/pstore + DEBUG_KERNEL defaults)"
+[ "$ETK_FORENSICS" = 1 ] && DRIFT_NOTE="$DRIFT_NOTE + the FORENSICS block (wdt/lockup/pstore + DEBUG_KERNEL's ABI-neutral defaults)"
 log "config drift vs rig ground truth (expect only INITRAMFS/FIRMWARE paths + toolchain-probe lines$DRIFT_NOTE):"
 cat /kernel/config72$SFX.drift
 
