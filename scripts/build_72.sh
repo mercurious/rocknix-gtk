@@ -54,6 +54,25 @@ ETK_INTERNAL_MIC="${ETK_INTERNAL_MIC:-1}"
 # =m (it IS the rig); the drift log shows exactly this line. ETK_GPIO_SBU_BUILTIN=0 =
 # pure-parity mint (the A/B arm that reproduces the missing logo).
 ETK_GPIO_SBU_BUILTIN="${ETK_GPIO_SBU_BUILTIN:-1}"
+# FORENSICS (2026-10-11, ETK GT5 op -- etk-dossiers Hunt_GT5_20261011.md §8): GT5 freezes the
+# whole SoC and a firmware watchdog resets it ~6.5 s later (N=4), so Linux never logs a word and
+# the SoC has no working dump path (Sahara gave no 900e). ETK_FORENSICS=1 mints a HUNT kernel that
+# can witness the freeze, everything log-only or dark until armed:
+#   WATCHDOG_SYSFS            read the APSS wdt's state/timeout/bootstatus without opening (=arming)
+#                             it: is it running from boot, and did IT bite last time?
+#   pretimeout governors      bark plumbing (qcom-wdt has set_pretimeout; bark IRQ wired), noop default
+#   DEBUG_KERNEL + soft/hard  lockup detectors, LOG-ONLY (BOOTPARAM_*_PANIC stay off), with
+#     lockup detectors        watchdog_thresh=2 -> hard 2 s / soft 4 s, inside the ~6.5 s window
+#   ARM64_PSEUDO_NMI          + the cmdline switch: a live core can backtrace one spinning with IRQs off
+#   PSTORE_RAM=y + CONSOLE    ramoops in reserve_mem: the console log lives in RAM; GT5's death is a
+#                             WARM reset (PMIC warm_reset=PS_HOLD) and RAM survival across a WARM
+#                             reset was never tested (2026-07-02 falsified it on COLD Linux-panic
+#                             resets). etk's blackbox_d already harvests /sys/fs/pstore at boot.
+# Default 0: every certified mint is unchanged. NOT for release.
+ETK_FORENSICS="${ETK_FORENSICS:-0}"
+if [ "$ETK_FORENSICS" = 1 ]; then
+  ETK_CMDLINE="$ETK_CMDLINE irqchip.gicv3_pseudo_nmi=1 watchdog_thresh=2 sysctl.kernel.hardlockup_all_cpu_backtrace=1 sysctl.kernel.softlockup_all_cpu_backtrace=1 reserve_mem=2M:4096:etk_ramoops ramoops.mem_name=etk_ramoops ramoops.record_size=0x40000 ramoops.console_size=0x80000 ramoops.max_reason=2 efi_pstore.pstore_disable=1"
+fi
 REF_KERNEL="$STG/KERNEL.stock-$BASEDATE"
 
 # gcc-15 is the VALIDATED compiler (15.3.0 built every shipping artifact). Do not
@@ -176,12 +195,32 @@ else
   log "boot-logo fix: OFF (BOOTIMG=$BOOTIMG ETK_GPIO_SBU_BUILTIN=$ETK_GPIO_SBU_BUILTIN) -- stock =m, logo missing on 20261001 is EXPECTED"
 fi
 
+if [ "$ETK_FORENSICS" = 1 ]; then
+  "$SRC/scripts/config" --file "$OUT/.config" \
+    --enable CONFIG_WATCHDOG_SYSFS \
+    --enable CONFIG_WATCHDOG_PRETIMEOUT_GOV \
+    --enable CONFIG_WATCHDOG_PRETIMEOUT_GOV_NOOP \
+    --enable CONFIG_WATCHDOG_PRETIMEOUT_GOV_PANIC \
+    --enable CONFIG_WATCHDOG_PRETIMEOUT_DEFAULT_GOV_NOOP \
+    --enable CONFIG_DEBUG_KERNEL \
+    --enable CONFIG_SOFTLOCKUP_DETECTOR \
+    --enable CONFIG_HARDLOCKUP_DETECTOR \
+    --enable CONFIG_HARDLOCKUP_DETECTOR_PREFER_BUDDY \
+    --disable CONFIG_BOOTPARAM_SOFTLOCKUP_PANIC \
+    --disable CONFIG_BOOTPARAM_HARDLOCKUP_PANIC \
+    --enable CONFIG_ARM64_PSEUDO_NMI \
+    --enable CONFIG_PSTORE_RAM \
+    --enable CONFIG_PSTORE_CONSOLE
+  log "FORENSICS kernel: wdt sysfs + pretimeout govs, log-only lockup detectors, pseudo-NMI, ramoops console -- expect them (and DEBUG_KERNEL's defaults) in the drift; cmdline + '$ETK_CMDLINE'"
+fi
+
 MAKE="make -C $SRC O=$OUT ARCH=arm64 CC=$KCC HOSTCC=$KCC KBUILD_BUILD_HOST=rocknix-gtk -j6"
 
 # --- 5. olddefconfig + drift check against ground truth ---
 $MAKE olddefconfig > /tmp/olddefconfig.log 2>&1 || { cat /tmp/olddefconfig.log; die "olddefconfig failed"; }
 diff $CFG_GT "$OUT/.config" > /kernel/config72$SFX.drift
 DRIFT_NOTE=""; [ "$SPLASH_FIX" = 1 ] && DRIFT_NOTE=" + the one TYPEC_MUX_GPIO_SBU m->y line (boot-logo fix)"
+[ "$ETK_FORENSICS" = 1 ] && DRIFT_NOTE="$DRIFT_NOTE + the FORENSICS block (wdt/lockup/NMI/pstore + DEBUG_KERNEL defaults)"
 log "config drift vs rig ground truth (expect only INITRAMFS/FIRMWARE paths + toolchain-probe lines$DRIFT_NOTE):"
 cat /kernel/config72$SFX.drift
 
