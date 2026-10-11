@@ -337,9 +337,9 @@ Each is kernel-image-only and preserves the module ABI (`uname -r` = `7.1.2`, un
 - **Measurement trap (not fixed here):** the charger's `current_now` under-reads the USB
   input ~5× on the Flip 2 (95.7 mA shown at the 500 mA ICL; 285 mA at a 1.45 A AICL).
   Judge with `ICL_STATUS` (0x1107) and the battery's `current_now`.
-- **Verdict (honest):** defect **measured on our rig**; fix **static-verified only**
-  (applies zero-fuzz to both 7.2 lanes' driver; the patched file was diffed, not
-  compiled host-side). `build_72.sh` VERIFY fails the lane if it is absent. Acceptance:
-  VALIDATION.md "#10".
+- **Verdict (honest):** defect **measured on our rig**; fix **LIVE 2026-10-10** in
+  `20261001-0.6.4` (sha `4494a67e…`): operator cold boot on the M1's USB-C → ICL 3.0 A
+  (`1107: 3c`, was `0a`), battery charging at ~1.87 A, no APSD spam, `abl_slot verify`
+  PASS. `build_72.sh` VERIFY fails the lane if it is absent. Open items: VALIDATION.md "#10".
 - **Upstreamability:** yes, as a ROCKNIX PR against `0011` (Rp-aware ICL and the
   override are general SMB5 behaviour; downstream msm `smb5-lib` does both).

@@ -299,7 +299,15 @@ Gate (car12, cold boot through `install.sh`):
 Falsifier: `=y` live and msm still bound after `load_splash` → the deferral chain was
 misread; fallback = an init-side wait for `/dev/fb0` (upstream `load_splash`).
 
-## #10 Type-C input current limit — gate (pending; written 2026-10-10)
+## #10 Type-C input current limit — gate (PASSED on car8, 2026-10-10, KERNEL.rocknix-gtk-20261001-0.6.4 sha 4494a67e…)
+**Result (cold boot, direct USB-C to the M1):** lane VERIFY `#10 … PRESENT`, config drift 16
+lines = the certified 0.6.3's; `abl_slot.sh verify` PASS (10 checks, logo before root mount);
+dmesg `input current limit 3000 mA (APSD done, Type-C Rp 3000 mA)`, `Apsd not ready` × 0;
+regmap `1107: 3c` / `1108: 3c` (ICL/AICL 3.0 A, was `0a` = 500 mA), `1342: 01`; battery
+CHARGING at ~1.87 A (the #9 1.90 A cap; this gauge reports charge current as negative)
+with VBUS ~4.4 V under the 3 A draw. Open: item 4 under a GT6 boot, item 5 (wall charger
+and A-to-C paths).
+
 Mint: `FORGE_KERNEL_VER=0.6.4` (never the certified 0.6.3 name), 20261001 lane, after the
 node's fork is at #10 and staging refreshed (`provision_node.sh checkouts groundtruth`).
 Lane VERIFY must print `#10 pm8150b Type-C input current limit: PRESENT`.
