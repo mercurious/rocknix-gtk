@@ -2,7 +2,8 @@
 # ROCKNIX-GTK Tier-K kernel pipeline — 7.2 / ROCKNIX 20260901 rebase lane.
 # Same contract as build_712.sh (7.1.2 lane, kept intact until the 7.2 kernel
 # is cold-boot validated + certified): mainline tarball + ROCKNIX patch stack
-# + rig-ground-truth config + ETK patches (patches-7.2/, SEVEN active — #9
+# + rig-ground-truth config + ETK patches (patches-7.2/, EIGHT active — #10
+# pm8150b-charger-typec-icl added 2026-10-10 (charge from a laptop's USB-C port); #9
 # pm8150b-charger-float-voltage added 2026-09-26 (battery safety); #6
 # dp-bounded-enable-lock is DROPPED on 7.2: upstream removed event_mutex from
 # dp_display.c entirely, the lock this patch bounds no longer exists; #4 is
@@ -134,7 +135,7 @@ log "SUBLEVEL: $(grep '^SUBLEVEL' "$SRC/Makefile")"
 cp -r $STG/dts-device-$BASEDATE/* "$SRC/arch/arm64/boot/dts/" || die "dts copy failed"
 
 # --- 3. Patch stack in scripts/unpack order: mainline -> 7.2 -> device
-#        SM8250 -> 04-etk (SEVEN patches; see patches-7.2/ and PATCHES.md) ---
+#        SM8250 -> 04-etk (EIGHT patches; see patches-7.2/ and PATCHES.md) ---
 if [ ! -f "$SRC/.etk-patches-applied" ]; then
   for d in 01-mainline 02-72 03-device 04-etk; do
     [ -d $PDIR/$d ] || continue
@@ -233,6 +234,12 @@ grep -q 'clamp(chip->batt_info->voltage_max_design_uv, 3600000, 4450000)' \
     "$SRC/drivers/power/supply/qcom_pm8150b_charger.c" \
   && echo "#9 pm8150b float-voltage fix: PRESENT" \
   || die "#9 pm8150b float-voltage fix MISSING from the built tree"
+# #10: the input current limit follows the Type-C source and is actually applied
+# (ICL override). Without it a Flip 2 on a laptop's USB-C port sits at 500 mA.
+grep -q 'smb5_typec_rp_current' "$SRC/drivers/power/supply/qcom_pm8150b_charger.c" \
+  && grep -q 'ICL_OVERRIDE_BIT, ICL_OVERRIDE_BIT' "$SRC/drivers/power/supply/qcom_pm8150b_charger.c" \
+  && echo "#10 pm8150b Type-C input current limit: PRESENT" \
+  || die "#10 pm8150b Type-C input current limit MISSING from the built tree"
 # Boot-logo fix: the gate is the BUILT config, not the request -- olddefconfig could
 # silently drop a symbol whose deps moved. Built-in = modules.builtin lists it and
 # modules.order does not (NOT a find for the .ko: an incremental rebuild leaves the old one).

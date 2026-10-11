@@ -298,3 +298,19 @@ Gate (car12, cold boot through `install.sh`):
   Internal Mic in the booted DT).
 Falsifier: `=y` live and msm still bound after `load_splash` → the deferral chain was
 misread; fallback = an init-side wait for `/dev/fb0` (upstream `load_splash`).
+
+## #10 Type-C input current limit — gate (pending; written 2026-10-10)
+Mint: `FORGE_KERNEL_VER=0.6.4` (never the certified 0.6.3 name), 20261001 lane, after the
+node's fork is at #10 and staging refreshed (`provision_node.sh checkouts groundtruth`).
+Lane VERIFY must print `#10 pm8150b Type-C input current limit: PRESENT`.
+After `install.sh` (KERNEL_IMAGE = the 0.6.4 boot.img) + a COLD boot, car8 on a direct
+USB-C ↔ USB-C cable to the M1:
+1. `tools/abl_slot.sh verify car8-usb --car car8` passes as for 0.6.3 (boot logo, modules,
+   keepalive, panel, GPU).
+2. dmesg: one `input current limit 3000 mA (APSD not ready, Type-C Rp 3000 mA)` per plug-in;
+   no `Apsd not ready` spam.
+3. regmap `0-02`: `1342: 01` (override on) and `1107` (ICL_STATUS) well above `0a`.
+4. Battery `current_now` POSITIVE at idle (was −120 to −160 mA); stays ≥ 0 through a GT6 boot
+   with Pitlink attached.
+5. A wall charger (DCP) and the A-to-C path still charge as before (`usb_type` DCP / SDP).
+Falsifier: ICL_STATUS stays `0a`, or VBUS collapses (the M1 port cutting out) under load.

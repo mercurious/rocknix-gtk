@@ -3,6 +3,11 @@
 Discrete patches over the reconstructed ROCKNIX `7.1.2` SM8250 tree (see `BUILDING.md`).
 Each is kernel-image-only and preserves the module ABI (`uname -r` = `7.1.2`, unchanged).
 
+> **2026-10-10:** `patches-7.2/` gains **#10 `pm8150b-charger-typec-icl`** (ETK-original):
+> the Flip 2 now charges from a laptop's USB-C port. Before it, a car tethered to the M1
+> for Pitlink sat at a 500 mA input and discharged at idle, which ruled out overnight
+> hunts. Applies zero-fuzz on both 7.2 lanes (20260901 + #9, and 20261001).
+>
 > **2026-10-08 — a CONFIG DELTA, not a patch:** the boot.img lane (`BASEDATE` ≥ 20261001)
 > sets `CONFIG_TYPEC_MUX_GPIO_SBU=y` over the rig ground truth (`=m`), carrying upstream
 > ROCKNIX `187eb24f2e` "sm8250: fix splash at boot": with the mux a module, the USB-C
@@ -306,3 +311,35 @@ Each is kernel-image-only and preserves the module ABI (`uname -r` = `7.1.2`, un
   `patches-7.2/ABSORBED` makes `stage_72.sh` skip it for BASEDATE >= 20261001; the 20260901
   lane still carries it. `build_72.sh` step 7 keeps checking the clamp IN THE TREE, so the
   fix is verified present either way.
+
+### Patch #10 — `pm8150b-charger-typec-icl`: take the Type-C source's current, and apply it
+- **File:** `drivers/power/supply/qcom_pm8150b_charger.c` (created by ROCKNIX device patch
+  `0011-qcom-pm8150b-charger`; ours applies after it, and after #9 on the 20260901 lane) —
+  `patches-7.2/0010-...`. ETK-original.
+- **The problem it solves:** car8 tethered to an M1 MacBook Air's USB-C port (Asahi) for
+  Pitlink: the laptop advertised **Rp 3.0 A** and negotiated a **5 V / 3 A USB-PD
+  contract** (`/sys/class/usb_power_delivery/pd*/source-capabilities`: 5000 mV / 3000 mA),
+  but the input stayed at **500 mA** and the battery discharged at idle (−120 to −160 mA,
+  14 %). Read-back 2026-10-10 (regmap debugfs `0-02`): `1506: 02` (TYPE_C_SNK_STATUS =
+  Rp 3.0 A), `1307: 00` (APSD never done), `1342: 00` (no ICL override), `1370: 42`
+  (USBIN_CURRENT_LIMIT_CFG = 3.3 A) yet `1107: 0a` (ICL_STATUS = 500 mA); dmesg
+  `Apsd not ready` every ~100 ms. Two defects: (1) BC1.2 APSD never concludes against a
+  USB-PD data source, so `smb5_status_change_work` re-ran APSD every second forever and
+  never chose a limit; (2) `USBIN_CURRENT_LIMIT_CFG` only applies under `CMD_ICL_OVERRIDE`,
+  which the driver never set, so the PMIC kept its own USB-mode limit even after APSD.
+- **What it does:** reads the source's Rp from `TYPE_C_SNK_STATUS` (3.0 A / 1.5 A /
+  default). APSD not ready + Rp 1.5/3 A → limit = Rp, no rerun loop; Rp-default keeps the
+  old rerun (a slow APSD on a legacy cable still reaches BC1.2's answer). After APSD the
+  limit is `max(BC1.2 type, Rp)`. `smb5_set_current_limit` sets `CMD_ICL_OVERRIDE`
+  (cleared on unplug); AICL stays enabled, so a weak source still pulls the input down.
+  `Apsd not ready` → `dev_dbg`; `usb_type` reads `Unknown` instead of `-EAGAIN`; one
+  `input current limit N mA (APSD …, Type-C Rp N mA)` line per plug-in.
+- **Measurement trap (not fixed here):** the charger's `current_now` under-reads the USB
+  input ~5× on the Flip 2 (95.7 mA shown at the 500 mA ICL; 285 mA at a 1.45 A AICL).
+  Judge with `ICL_STATUS` (0x1107) and the battery's `current_now`.
+- **Verdict (honest):** defect **measured on our rig**; fix **static-verified only**
+  (applies zero-fuzz to both 7.2 lanes' driver; the patched file was diffed, not
+  compiled host-side). `build_72.sh` VERIFY fails the lane if it is absent. Acceptance:
+  VALIDATION.md "#10".
+- **Upstreamability:** yes, as a ROCKNIX PR against `0011` (Rp-aware ICL and the
+  override are general SMB5 behaviour; downstream msm `smb5-lib` does both).

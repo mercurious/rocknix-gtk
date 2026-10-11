@@ -1,0 +1,185 @@
+ETK-GTK patch #10 -- pm8150b-charger-typec-icl
+ETK-original. Applies after ROCKNIX device patch 0011-qcom-pm8150b-charger (verified
+zero-fuzz on both lanes: tag 20261001's 0011, and 13e18947's 0011 + our #9).
+
+A Retroid Flip 2 tethered to a laptop's USB-C port (an M1 MacBook Air under Asahi,
+2026-10-10) never charged: the laptop advertised Rp 3.0 A and negotiated a 5 V / 3 A
+USB-PD contract, yet the charger held the input at 500 mA and the battery discharged
+at idle. Read-back (regmap debugfs 0-02): TYPE_C_SNK_STATUS 0x1506 = 0x02 (Rp 3.0 A),
+APSD_STATUS 0x1307 = 0x00 (never done), CMD_ICL_OVERRIDE 0x1342 = 0x00,
+USBIN_CURRENT_LIMIT_CFG 0x1370 = 0x42 (3.3 A) but ICL_STATUS 0x1107 = 0x0a (500 mA);
+dmesg repeated "Apsd not ready" every ~100 ms.
+
+Two defects, both in smb5_status_change_work's path:
+ 1. APSD (BC1.2 detection) never concludes against a USB-PD data source, so the worker
+    re-ran APSD every second forever and never chose a limit. Now a source advertising
+    Rp 1.5 A / 3 A is taken at its word (Rp-default keeps the old rerun, so a slow APSD
+    on a legacy cable still reaches its BC1.2 answer), and Type-C current also lifts an
+    SDP result (max(BC1.2, Rp)).
+ 2. USBIN_CURRENT_LIMIT_CFG only applies under CMD_ICL_OVERRIDE; without it the PMIC
+    keeps its own APSD/USB-mode limit. smb5_set_current_limit now sets the override
+    (cleared on unplug, so the next source starts from the PMIC's own limit). AICL
+    stays enabled, so a weak source still pulls the input back down.
+Also: "Apsd not ready" is dev_dbg (an expected transient), usb_type reads UNKNOWN
+instead of -EAGAIN while APSD runs, and the chosen limit is logged once per plug-in.
+
+Note for measuring: this charger's current_now under-reads USB input by ~5x on the
+Flip 2 (95.7 mA reported at the 500 mA ICL; 285 mA at a 1.45 A AICL) -- judge with
+ICL_STATUS (0x1107) and the battery's current_now, not the charger's current_now.
+
+From: mercurious (with Claude Opus 5.5) <dutch.money@gmail.com>
+Subject: [PATCH] power: supply: qcom_pm8150b_charger: honour the Type-C source
+ current and apply the input current limit
+
+---
+--- a/drivers/power/supply/qcom_pm8150b_charger.c
++++ b/drivers/power/supply/qcom_pm8150b_charger.c
+@@ -357,7 +357,7 @@
+ 		return rc;
+ 	}
+ 	if (!(apsd_stat & APSD_DTC_STATUS_DONE_BIT)) {
+-		dev_err(chip->dev, "Apsd not ready");
++		dev_dbg(chip->dev, "Apsd not ready\n");
+ 		return -EAGAIN;
+ 	}
+ 
+@@ -388,6 +388,25 @@
+ 	return 0;
+ }
+ 
++/*
++ * The current a Type-C source advertises through its Rp pull-up, in uA, or 0 when
++ * no Type-C source is seen (a legacy A-to-C cable reads as Rp-default = USB default).
++ */
++static unsigned int smb5_typec_rp_current(struct smb5_chip *chip)
++{
++	unsigned int stat;
++
++	if (regmap_read(chip->regmap, chip->base + TYPE_C_SNK_STATUS, &stat) < 0)
++		return 0;
++	if (stat & SNK_RP_3P0_BIT)
++		return 3000000;
++	if (stat & SNK_RP_1P5_BIT)
++		return 1500000;
++	if (stat & SNK_RP_STD_BIT)
++		return SDP_CURRENT_UA;
++	return 0;
++}
++
+ static int smb5_get_prop_status(struct smb5_chip *chip, int *val)
+ {
+ 	unsigned char stat[2];
+@@ -449,6 +468,7 @@
+ static int smb5_set_current_limit(struct smb5_chip *chip, unsigned int val)
+ {
+ 	unsigned char val_raw;
++	int rc;
+ 
+ 	if (val > 4950000) {
+ 		dev_err(chip->dev,
+@@ -457,13 +477,23 @@
+ 	}
+ 	val_raw = val / CURRENT_SCALE_FACTOR;
+ 
+-	return regmap_write(chip->regmap, chip->base + USBIN_CURRENT_LIMIT_CFG,
++	rc = regmap_write(chip->regmap, chip->base + USBIN_CURRENT_LIMIT_CFG,
+ 		val_raw);
++	if (rc < 0)
++		return rc;
++
++	/*
++	 * Without the override the PMIC keeps its own APSD / USB-mode limit and never
++	 * applies USBIN_CURRENT_LIMIT_CFG: on a Retroid Flip 2 tethered to a laptop the
++	 * CFG read 0x42 (3.3 A) while ICL_STATUS stayed 0x0a (500 mA).
++	 */
++	return regmap_update_bits(chip->regmap, chip->base + CMD_ICL_OVERRIDE,
++				  ICL_OVERRIDE_BIT, ICL_OVERRIDE_BIT);
+ }
+ 
+ static void smb5_status_change_work(struct work_struct *work)
+ {
+-	unsigned int charger_type, current_ua;
++	unsigned int charger_type, current_ua, rp_ua;
+ 	int usb_online = 0;
+ 	int count, rc;
+ 	struct smb5_chip *chip;
+@@ -471,8 +501,12 @@
+ 	chip = container_of(work, struct smb5_chip, status_change_work.work);
+ 
+ 	smb5_get_prop_usb_online(chip, &usb_online);
+-	if (!usb_online)
++	if (!usb_online) {
++		/* the next source starts from the PMIC's own limit, not the last one's */
++		regmap_update_bits(chip->regmap, chip->base + CMD_ICL_OVERRIDE,
++				   ICL_OVERRIDE_BIT, 0);
+ 		return;
++	}
+ 
+ 	for (count = 0; count < 3; count++) {
+ 		dev_dbg(chip->dev, "get charger type retry %d\n", count);
+@@ -487,13 +521,23 @@
+ 		return;
+ 	}
+ 
++	rp_ua = smb5_typec_rp_current(chip);
+ 	if (rc < 0) {
+-		rc = regmap_update_bits(chip->regmap, chip->base + CMD_APSD,
+-					APSD_RERUN_BIT, APSD_RERUN_BIT);
+-		schedule_delayed_work(&chip->status_change_work,
+-				      msecs_to_jiffies(1000));
+-		dev_dbg(chip->dev, "get charger type failed, rerun apsd\n");
+-		return;
++		/* Rp-default (a legacy cable) says nothing BC1.2 won't: keep rerunning APSD */
++		if (rp_ua <= SDP_CURRENT_UA) {
++			rc = regmap_update_bits(chip->regmap, chip->base + CMD_APSD,
++						APSD_RERUN_BIT, APSD_RERUN_BIT);
++			schedule_delayed_work(&chip->status_change_work,
++					      msecs_to_jiffies(1000));
++			dev_dbg(chip->dev, "get charger type failed, rerun apsd\n");
++			return;
++		}
++		/*
++		 * APSD never concludes against a USB-PD data source (a laptop's USB-C
++		 * port): rerunning it forever only left the input at 500 mA. A source
++		 * advertising Rp 1.5 A / 3 A states what it can supply; take it at its word.
++		 */
++		charger_type = POWER_SUPPLY_USB_TYPE_SDP;
+ 	}
+ 
+ 	switch (charger_type) {
+@@ -509,7 +553,12 @@
+ 		break;
+ 	}
+ 
++	/* Type-C current beats BC1.2's SDP default when the source offers more */
++	current_ua = max(current_ua, rp_ua);
++
+ 	smb5_set_current_limit(chip, current_ua);
++	dev_info(chip->dev, "input current limit %u mA (APSD %s, Type-C Rp %u mA)\n",
++		 current_ua / 1000, rc < 0 ? "not ready" : "done", rp_ua / 1000);
+ 	power_supply_changed(chip->chg_psy);
+ }
+ 
+@@ -576,6 +625,7 @@
+ 			     union power_supply_propval *val)
+ {
+ 	struct smb5_chip *chip = power_supply_get_drvdata(psy);
++	int rc;
+ 
+ 	switch (psp) {
+ 	case POWER_SUPPLY_PROP_MANUFACTURER:
+@@ -599,7 +649,13 @@
+ 	case POWER_SUPPLY_PROP_HEALTH:
+ 		return smb5_get_prop_health(chip, &val->intval);
+ 	case POWER_SUPPLY_PROP_USB_TYPE:
+-		return smb5_apsd_get_charger_type(chip, &val->intval);
++		rc = smb5_apsd_get_charger_type(chip, &val->intval);
++		/* APSD still running (or never concluding, on a USB-PD source): not an error */
++		if (rc == -EAGAIN) {
++			val->intval = POWER_SUPPLY_USB_TYPE_UNKNOWN;
++			rc = 0;
++		}
++		return rc;
+ 	default:
+ 		dev_err(chip->dev, "invalid property: %d\n", psp);
+ 		return -EINVAL;
