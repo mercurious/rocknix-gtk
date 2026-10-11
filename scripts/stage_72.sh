@@ -120,7 +120,7 @@ if [ -f "$REPO/patches-7.2/ABSORBED" ]; then
     done < "$REPO/patches-7.2/ABSORBED"
 fi
 NE=$(find "$S/$PD/04-etk" -name '*.patch' | wc -l)
-[ "$NE" = "$((7 - NABS))" ] || log "WARN: ETK patch count $NE != expected $((7 - NABS)) (7 carried on 7.2, minus $NABS absorbed upstream)"
+[ "$NE" = "$((8 - NABS))" ] || log "WARN: ETK patch count $NE != expected $((8 - NABS)) (8 carried on 7.2, minus $NABS absorbed upstream)"
 log "  04-etk: $NE ETK patches"
 
 # --- 3. device DTS overlay ---
