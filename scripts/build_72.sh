@@ -130,6 +130,25 @@ if [ "$BOOTIMG" = 1 ]; then
     python3 -I "$STG/etk_dtb_mic.py" >/dev/null 2>&1 || [ $? = 2 ] || die "staging/etk_dtb_mic.py does not run"
   fi
 fi
+# ETK STACK SYNC (2026-10-11): 04-etk is re-derived from THIS repo's committed patches-7.2/ at every
+# build (the repo is /work), with stage_72.sh's own ABSORBED rule. Before this, a new ETK patch reached
+# the build only if someone re-ran stage_72.sh: forge's fingerprint saw the new repo tip and built, the
+# stale staged set's stamp matched, and the mint shipped WITHOUT the patch (0.6.4.3, patch #11 -- caught
+# before install). The ROCKNIX-sourced stacks (01-03) stay stage_72.sh's job.
+if [ -d /work/patches-7.2 ]; then
+  mkdir -p "$PDIR/04-etk"
+  rm -f "$PDIR/04-etk/"*.patch
+  cp /work/patches-7.2/*.patch "$PDIR/04-etk/" || die "04-etk sync from /work/patches-7.2 failed"
+  if [ -f /work/patches-7.2/ABSORBED ]; then
+    while read -r since pf evidence; do
+      case "$since" in ''|\#*) continue ;; esac
+      if [ "$BASEDATE" -ge "$since" ] && [ -f "$PDIR/04-etk/$pf" ]; then
+        rm -f "$PDIR/04-etk/$pf"; log "04-etk: skipping $pf (absorbed upstream since $since)"
+      fi
+    done < /work/patches-7.2/ABSORBED
+  fi
+  log "04-etk synced from the repo: $(ls "$PDIR/04-etk/" | LC_ALL=C sort | tr '\n' ' ')"
+fi
 PSET=$(cd $PDIR && find . -name '*.patch' | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -c1-16)
 [ -n "$PSET" ] || die "could not fingerprint staging/patches-72"
 if [ -d "$SRC" ] && [ "$(cat "$SRC/.etk-patches-applied" 2>/dev/null)" != "$PSET" ]; then
