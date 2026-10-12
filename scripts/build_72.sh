@@ -63,6 +63,8 @@ ETK_GPIO_SBU_BUILTIN="${ETK_GPIO_SBU_BUILTIN:-1}"
 #   pretimeout governors      bark plumbing (qcom-wdt has set_pretimeout; bark IRQ wired), noop default
 #   DEBUG_KERNEL + soft/hard  lockup detectors, LOG-ONLY (BOOTPARAM_*_PANIC stay off), with
 #     lockup detectors        watchdog_thresh=2 -> hard 2 s / soft 4 s, inside the ~6.5 s window
+#   msm.gpu_stall_on_fault=0  patch #11: the adreno SMMU terminates faulting GPU transactions
+#                             instead of stalling them (the GT5 freeze hypothesis, Hunt_GT5 §16)
 #   (NOT pseudo-NMI, NOT the hung-task detector: see the MODULE-ABI GUARD below -- 0.6.4.1 was
 #    minted with both and REJECTED before install, 2026-10-11)
 #   PSTORE_RAM=y + CONSOLE    ramoops in reserve_mem: the console log lives in RAM; GT5's death is a
@@ -72,7 +74,7 @@ ETK_GPIO_SBU_BUILTIN="${ETK_GPIO_SBU_BUILTIN:-1}"
 # Default 0: every certified mint is unchanged. NOT for release.
 ETK_FORENSICS="${ETK_FORENSICS:-0}"
 if [ "$ETK_FORENSICS" = 1 ]; then
-  ETK_CMDLINE="$ETK_CMDLINE watchdog_thresh=2 sysctl.kernel.hardlockup_all_cpu_backtrace=1 sysctl.kernel.softlockup_all_cpu_backtrace=1 reserve_mem=2M:4096:etk_ramoops ramoops.mem_name=etk_ramoops ramoops.record_size=0x40000 ramoops.console_size=0x80000 ramoops.max_reason=2 efi_pstore.pstore_disable=1"
+  ETK_CMDLINE="$ETK_CMDLINE msm.gpu_stall_on_fault=0 watchdog_thresh=2 sysctl.kernel.hardlockup_all_cpu_backtrace=1 sysctl.kernel.softlockup_all_cpu_backtrace=1 reserve_mem=2M:4096:etk_ramoops ramoops.mem_name=etk_ramoops ramoops.record_size=0x40000 ramoops.console_size=0x80000 ramoops.max_reason=2 efi_pstore.pstore_disable=1"
 fi
 REF_KERNEL="$STG/KERNEL.stock-$BASEDATE"
 

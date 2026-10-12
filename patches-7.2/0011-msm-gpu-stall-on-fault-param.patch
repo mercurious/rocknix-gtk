@@ -1,0 +1,61 @@
+--- a/drivers/gpu/drm/msm/adreno/adreno_gpu.c
++++ b/drivers/gpu/drm/msm/adreno/adreno_gpu.c
+@@ -263,7 +263,7 @@
+ 	 * collect a crashdump to re-enable stall-on-fault.
+ 	 */
+ 	spin_lock_irqsave(&priv->fault_stall_lock, flags);
+-	if (!priv->stall_enabled &&
++	if (!priv->stall_enabled && READ_ONCE(msm_gpu_stall_on_fault) &&
+ 			ktime_after(ktime_get(), priv->stall_reenable_time) &&
+ 			!READ_ONCE(gpu->crashstate)) {
+ 		struct msm_mmu *mmu = to_msm_vm(gpu->vm)->mmu;
+--- a/drivers/gpu/drm/msm/msm_iommu.c
++++ b/drivers/gpu/drm/msm/msm_iommu.c
+@@ -11,6 +11,25 @@
+ #include "msm_gpu_trace.h"
+ #include "msm_mmu.h"
+ 
++/*
++ * ROCKNIX-GTK / ETK (GT5 SoC freeze, 2026-10-11 -- etk-dossiers Hunt_GT5_20261011.md):
++ *
++ * With stall-on-fault on, a GPU translation fault parks the faulting transaction on the
++ * interconnect until the fault handler resumes it. On SM8250, Gran Turismo 5 makes the GPU's
++ * TP/VFD read unmapped low IOVAs (0x100000, 0x180000) during track loads and races; the faults
++ * that got printed were survived, and one shortly after froze every core with no log at all
++ * until a firmware watchdog warm-reset the SoC (N=10). When this is false the adreno SMMU
++ * TERMINATES faulting transactions instead (CFCFG=0: the GPU takes the abort and keeps going),
++ * and the fault handler never re-arms stalling. The default (true) is stock msm exactly.
++ * Writable at runtime (the next re-arm honours it); bake msm.gpu_stall_on_fault=0 into the
++ * cmdline for boot.
++ */
++bool msm_gpu_stall_on_fault = true;
++module_param_named(gpu_stall_on_fault, msm_gpu_stall_on_fault, bool, 0644);
++MODULE_PARM_DESC(gpu_stall_on_fault,
++	"Stall the GPU SMMU on translation faults (1 = stock msm, default; 0 = terminate faulting "
++	"transactions: the GT5 SoC-freeze fix)");
++
+ struct msm_iommu {
+ 	struct msm_mmu base;
+ 	struct iommu_domain *domain;
+@@ -795,9 +814,9 @@
+ 	}
+ 	iommu_set_fault_handler(iommu->domain, msm_gpu_fault_handler, iommu);
+ 
+-	/* Enable stall on iommu fault: */
++	/* Enable stall on iommu fault (unless the GTK knob says terminate): */
+ 	if (adreno_smmu->set_stall)
+-		adreno_smmu->set_stall(adreno_smmu->cookie, true);
++		adreno_smmu->set_stall(adreno_smmu->cookie, msm_gpu_stall_on_fault);
+ 
+ 	return mmu;
+ }
+--- a/drivers/gpu/drm/msm/msm_mmu.h
++++ b/drivers/gpu/drm/msm/msm_mmu.h
+@@ -92,4 +92,7 @@
+ int msm_iommu_pagetable_walk(struct msm_mmu *mmu, unsigned long iova, uint64_t ptes[4]);
+ struct iommu_domain_geometry *msm_iommu_get_geometry(struct msm_mmu *mmu);
+ 
++/* ROCKNIX-GTK: msm.gpu_stall_on_fault (msm_iommu.c) */
++extern bool msm_gpu_stall_on_fault;
++
+ #endif /* __MSM_MMU_H__ */

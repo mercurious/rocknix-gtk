@@ -3,6 +3,15 @@
 Discrete patches over the reconstructed ROCKNIX `7.1.2` SM8250 tree (see `BUILDING.md`).
 Each is kernel-image-only and preserves the module ABI (`uname -r` = `7.1.2`, unchanged).
 
+> **2026-10-11:** `patches-7.2/` gains **#11 `msm-gpu-stall-on-fault-param`** (ETK-original): a
+> runtime param `msm.gpu_stall_on_fault` (0644, default **1 = stock msm exactly**). At 0 the adreno
+> SMMU terminates faulting GPU transactions instead of stalling them on the interconnect, and the
+> fault handler never re-arms stalling. Why: Gran Turismo 5 freezes the whole SM8250 (every core,
+> no log, firmware watchdog warm reset ~7 s later; N=10), and the one run whose RAM console caught
+> the lead-up shows GPU TP/VFD translation faults at low IOVAs seconds before (etk-dossiers
+> Hunt_GT5_20261011.md §16). Armed only on the ETK_FORENSICS cmdline until a GT5 run validates it.
+> msm is built in (`CONFIG_DRM_MSM=y`), so the boot.img carries it; module ABI unchanged.
+>
 > **2026-10-10:** `patches-7.2/` gains **#10 `pm8150b-charger-typec-icl`** (ETK-original):
 > the Flip 2 now charges from a laptop's USB-C port. Before it, a car tethered to the M1
 > for Pitlink sat at a 500 mA input and discharged at idle, which ruled out overnight
