@@ -19,6 +19,7 @@
 #   KIT_DTB_TOOL=<etk bin/etk_dtb_mic.py>   (unset = pure parity, no splice)
 #   KIT_DTB_MODELS="Retroid Pocket Flip2|Retroid Pocket Flip2 Visionox"  (root model)
 #   KIT_DTB_FLAGS="--no-mic"                 (the ETK_INTERNAL_MIC=0 kill-switch)
+#   KIT_DTB_FLAGS="... --sd-poll"            (ETK_SD_POLL=1: the opt-in SD-slot poll delta)
 # Each matching DTB is derived into a temp copy (the splicer refuses anything it is
 # not sure of and stands down per delta); the gate then REQUIRES those models to
 # differ from stock and verify DTB_MIC_PATCHED, and every other DTB to be byte-

@@ -42,6 +42,10 @@ ETK_CMDLINE="${ETK_CMDLINE:-msm.context_keepalive=1 panic=30}"
 # never a copy kept in this repo.
 ETK_KIT_DTB="${ETK_KIT_DTB:-1}"
 ETK_INTERNAL_MIC="${ETK_INTERNAL_MIC:-1}"
+# ETK_SD_POLL=1 (2026-10-24, car8's dead SD card-detect switch) adds the splicer's opt-in
+# sdpoll delta: the SD host's cd-gpios becomes broken-cd, so the slot is polled and its
+# detect pin ignored. Default 0 = every certified mint, unchanged. Never a release kernel.
+ETK_SD_POLL="${ETK_SD_POLL:-0}"
 # BOOT LOGO (ABL era, 2026-10-08): stock 20261001 ships CONFIG_TYPEC_MUX_GPIO_SBU=m and
 # the 20261001 DTS routes the USB-C connector's orientation/mode switch through that
 # gpio-sbu-mux (e4461cfea5 retired the phantom nb7vpq904m, which was =y). The connector
@@ -342,14 +346,23 @@ if [ "$BOOTIMG" = 1 ]; then
   done
   echo "=== BOOT.IMG (qcom-abl) ==="
   KIT_ENV=""
+  KIT_FLAGS=""     # one env value, possibly two flags: passed whole, never through $KIT_ENV's split
   if [ "$ETK_KIT_DTB" = 1 ]; then
     KIT_ENV="KIT_DTB_TOOL=$STG/etk_dtb_mic.py"
-    [ "$ETK_INTERNAL_MIC" = 1 ] || KIT_ENV="$KIT_ENV KIT_DTB_FLAGS=--no-mic"
-    echo "kit DTB splice: ON (mic=$ETK_INTERNAL_MIC) via $STG/etk_dtb_mic.py sha $(sha256sum "$STG/etk_dtb_mic.py" | cut -c1-16)"
+    [ "$ETK_INTERNAL_MIC" = 1 ] || KIT_FLAGS="--no-mic"
+    if [ "$ETK_SD_POLL" = 1 ]; then
+      grep -q -- '--sd-poll' "$STG/etk_dtb_mic.py" || die "ETK_SD_POLL=1 but the staged splicer has no --sd-poll (pull the node's ~/etk)"
+      # the parity gate's kit check reads the mic delta only: an sdpoll-only kit DTB would
+      # fail it AFTER the whole build (proven 2026-10-24 on the stock 20261001 boot.img)
+      [ "$ETK_INTERNAL_MIC" = 1 ] || die "ETK_SD_POLL=1 needs ETK_INTERNAL_MIC=1 (the parity gate verifies kit DTBs by their mic delta)"
+      KIT_FLAGS="${KIT_FLAGS:+$KIT_FLAGS }--sd-poll"
+    fi
+    echo "kit DTB splice: ON (mic=$ETK_INTERNAL_MIC sdpoll=$ETK_SD_POLL) via $STG/etk_dtb_mic.py sha $(sha256sum "$STG/etk_dtb_mic.py" | cut -c1-16)"
   else
+    [ "$ETK_SD_POLL" = 1 ] && die "ETK_SD_POLL=1 is a kit DTB delta -- it needs ETK_KIT_DTB=1"
     echo "kit DTB splice: OFF (ETK_KIT_DTB=0) — pure-parity mint"
   fi
-  env $KIT_ENV bash /work/scripts/pack_bootimg.sh "$OUT/arch/arm64/boot/Image" "$REF_KERNEL" "$ETK_CMDLINE" \
+  KIT_DTB_FLAGS="$KIT_FLAGS" env $KIT_ENV bash /work/scripts/pack_bootimg.sh "$OUT/arch/arm64/boot/Image" "$REF_KERNEL" "$ETK_CMDLINE" \
        "$OUT/arch/arm64/boot/boot.img" $DTB_FILES \
     || die "boot.img packaging/parity FAILED — nothing to ship"
   grep -q "msm.context_keepalive=1" <(python3 -I /work/scripts/bootimg_parity.py show "$OUT/arch/arm64/boot/boot.img") \
