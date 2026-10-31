@@ -295,7 +295,11 @@ if [ "$ETK_FORENSICS" = 1 ]; then
   log "FORENSICS kernel: wdt sysfs + pretimeout govs, log-only lockup detectors, ramoops console -- expect them (and DEBUG_KERNEL's ABI-neutral defaults) in the drift; cmdline + '$ETK_CMDLINE'"
 fi
 
-MAKE="make -C $SRC O=$OUT ARCH=arm64 CC=$KCC HOSTCC=$KCC KBUILD_BUILD_HOST=rocknix-gtk -j6"
+# Parallelism follows the node (operator 2026-10-31, first etk-local mint): -j<nproc>, floor 6 so the
+# 4-core etk-cloud keeps the -j6 every shipped kernel was built with; the 10-core M1 Max gets -j10.
+# KJOBS= overrides. Jobs change wall time, never bytes (the build is deterministic per toolchain).
+KJOBS="${KJOBS:-$(nproc)}"; [ "$KJOBS" -ge 6 ] 2>/dev/null || KJOBS=6
+MAKE="make -C $SRC O=$OUT ARCH=arm64 CC=$KCC HOSTCC=$KCC KBUILD_BUILD_HOST=rocknix-gtk -j$KJOBS"
 
 # --- 5. olddefconfig + drift check against ground truth ---
 $MAKE olddefconfig > /tmp/olddefconfig.log 2>&1 || { cat /tmp/olddefconfig.log; die "olddefconfig failed"; }
@@ -332,7 +336,7 @@ if [ "$BOOTIMG" = 1 ] || [ "$BLS" = 1 ]; then
   [ "$BOOTIMG" = 1 ] && log "boot.img lane: DTBs (stock order):$DTB_TARGETS"
   [ "$BLS" = 1 ] && log "BLS lane: DTBs built for the parity gate only:$DTB_TARGETS"
 fi
-log "building Image + modules${DTB_TARGETS:+ + dtbs} with $($KCC --version | head -1) ..."
+log "building Image + modules${DTB_TARGETS:+ + dtbs} with $($KCC --version | head -1), -j$KJOBS ($(nproc) cores) ..."
 # DTC_FLAGS=-@ : ROCKNIX's linux package.mk builds every DTB with symbols
 #        (`DTC_FLAGS=-@ kernel_make ...`), which also makes dtc emit a phandle for
 #        every labelled node. Without it the 0.6 mint packed DTBs that were
