@@ -3,6 +3,34 @@
 Discrete patches over the reconstructed ROCKNIX `7.1.2` SM8250 tree (see `BUILDING.md`).
 Each is kernel-image-only and preserves the module ABI (`uname -r` = `7.1.2`, unchanged).
 
+> **2026-10-31 — the 20261101 base (BLS lane, read on nightly-20261030 = `next@611338d0d`):**
+> the full upstream stack (3 mainline + 12 `7.2` + 43 SM8250 device patches, every one of them
+> applied clean on pristine `linux-7.2` with the 12-file device DTS overlay) and then
+> `patches-7.2/` in `04-etk` order, on the host, 2026-10-31 (no mint). Result per patch:
+>
+> | # | patch | on nightly-20261030 | note |
+> |---|---|---|---|
+> | 1 | `0001-kgsl-parity-context-keepalive` | **applies, zero fuzz, no offset** | `msm_gpu.c` untouched upstream |
+> | 2 | `0002-q6afe-vote-probe-race` | applies, offsets 6/8/8, no fuzz | context shift only |
+> | 3 | `0003-typec-debounce-resample` | applies, **fuzz 1** on hunk 1 (offset 2), hunk 2 offset 49 | the one trailing context line (`static irqreturn_t pmic_typec_port_isr`) no longer follows the debounce worker: ROCKNIX device `0018-usb-typec-qcom-pmic-typec-switch-termination-on-pr-swap` inserts `qcom_pmic_typec_port_pr_swap_end()` there. Same stack as 20261001 (0018 was already in it), so this is the fuzz the live 0.6.x carried; the `tcpm_cc_change` notify lands in the right function (checked in the patched tree) |
+> | 4 | `0004-typec-mux-eprobe-defer` | applies, zero fuzz | |
+> | 5 | `0005-nb7vpq904m-always-program` | applies, zero fuzz | redriver is a phantom on the Flip 2 since e4461cfea5; harmless |
+> | 7 | `0007-dpu-encoder-resolution` | **applies, no fuzz, offset 12** on `dpu_kms.c` | survives the eleven new DPU patches (`7.2/0011–0018`, device `0201–0210`): they touch `dpu_plane.c`/`dpu_hw_*`/`dpu_encoder.c`, not the two `dpu_crtc.c`/`dpu_kms.c` sites this patch edits |
+> | 9 | `0009-pm8150b-charger-float-voltage` | **ABSORBED stays true**: `patch --dry-run` says "Reversed (or previously applied)"; the clamp is in the tree from device `0011-qcom-pm8150b-charger` | `patches-7.2/ABSORBED` unchanged; `build_72.sh` step 7 still greps the clamp |
+> | 10 | `0010-pm8150b-charger-typec-icl` | applies, zero fuzz, no offset | `smb5_typec_rp_current` + the `ICL_OVERRIDE` write present after apply |
+> | 11 | `0011-msm-gpu-stall-on-fault-param` | applies, zero fuzz, no offset | `msm_mmu.h`/`msm_iommu.c`/`adreno_gpu.c` |
+>
+> So **8 ride, as on 20261001**, with no refresh needed. **`ETK_GPIO_SBU_BUILTIN` is MOOT**: the
+> stock 20261101 config ships `CONFIG_TYPEC_MUX_GPIO_SBU=y` (upstream `187eb24f2e` is in the tag;
+> `groundtruth/nightly-20261030/config-diff-20261001-to-20261030.diff`), so the 2026-10-08 config
+> delta below has nothing to flip. `build_72.sh` ignores the knob on the BLS lane, asserts the
+> built-in from the BUILT config and the ground truth instead, and `bls_gate.sh` fails the mint
+> if the drift ever shows that line again. The knob and its 20261001 branch stay for the
+> 20261001 lane. The lane itself: `scripts/build_72.sh` (`BLS=1`), `scripts/bls_gate.sh`,
+> `scripts/stage_72.sh` (PE branch + offline carve), harness `scripts/test_bls_gate.sh`;
+> `UPSTREAM_20261101.md` §1c/§5. Toolchain: the stock kernel is gcc 16.2.0 now — the GCC-15 law
+> is a parity law, decision for the operator in `UPSTREAM_20261101.md` §5, not taken here.
+>
 > **2026-10-11:** `patches-7.2/` gains **#11 `msm-gpu-stall-on-fault-param`** (ETK-original): a
 > runtime param `msm.gpu_stall_on_fault` (0644, default **1 = stock msm exactly**). At 0 the adreno
 > SMMU terminates faulting GPU transactions instead of stalling them on the interconnect, and the

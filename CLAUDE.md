@@ -25,9 +25,15 @@ against nightly-20261030, re-check at the tag; offline ground truth in `groundtr
 2. **THE GCC-15 LAW**: kernels build with `gcc-15` (enforced in-recipe; sid's default moved to
    16). The failure mode of a wrong toolchain is a **silent pre-userspace black screen** — clean
    build, clean verify, dead rig. Never relax this to "whatever the container has".
+   **20261101 note:** stock ROCKNIX is built with gcc 16.2.0 from that release on; the law's
+   reason was parity with stock, its letter says 15. Which to follow for the 0.7.0 mint is the
+   OPERATOR's decision (`UPSTREAM_20261101.md` §5 lays out the inputs); until decided, the
+   recipe keeps `gcc-15` and a `KCC=gcc-16` override is a deliberate, cold-boot-gated choice.
 3. **Deploy**: only the operator, only via `~/etk/install.sh` (STEP 6.4: grub twin entries,
    `/flash/KERNEL.gtktest` + pristine `KERNEL.etk-stock` fallback; knobs `KERNEL_IMAGE`,
-   `KERNEL_CONTEXT_KEEPALIVE`, `KERNEL_DEPLOY_MODE`). **Only the operator's cold boot passes a
+   `KERNEL_CONTEXT_KEEPALIVE`, `KERNEL_DEPLOY_MODE`; 20261001: the ABL slot; 20261101+: a
+   Boot Loader Spec entry `loader/entries/etk-gtk.conf` + `KERNEL.gtk` + `dtbs/etk/<model>.dtb`
+   derived on the rig — the kit DTB splice and the cmdline moved from mint time to deploy time). **Only the operator's cold boot passes a
    kernel** — the forge can only build it. Claude NEVER contacts the rig from anywhere but the
    Air, and never reboots it.
 

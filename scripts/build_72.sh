@@ -8,6 +8,14 @@
 # dp-bounded-enable-lock is DROPPED on 7.2: upstream removed event_mutex from
 # dp_display.c entirely, the lock this patch bounds no longer exists; #4 is
 # switch-side only, upstream removed the buggy mux-side dedup loop).
+# THREE ARTIFACT FORMATS, ONE RECIPE (selected by BASEDATE, UPSTREAM_20261101.md §1c):
+#   20260901        GRUB era      -> raw Image (install.sh writes the grub twin entries)
+#   20261001        qcom-abl era  -> boot.img (BOOTIMG=1: pack_bootimg.sh + bootimg_parity.py,
+#                                    cmdline baked, kit DTBs spliced INTO the image at mint)
+#   20261101+       BLS era       -> raw PE Image again (BLS=1: OpenABL + Boot Loader Spec
+#                                    entries; cmdline = the entry's options line, DTB = a file
+#                                    under /flash/dtbs, both rendered at DEPLOY by the kit).
+#                                    No pack; scripts/bls_gate.sh is the parity proof.
 # LAW: gate every stage on real exit codes; never pipe make to tail.
 # LAW: build in the sid container (gcc 15.x / binutils >=2.44) — gcc-14
 #      black-screens pre-userspace on this target (proven 2026-07-05).
@@ -34,7 +42,15 @@ CFG_GT="$STG/config-7.2-rig$SFX.txt"
 # qcom-abl era (ROCKNIX 20261001+): /flash/KERNEL is an Android boot.img with the DTBs
 # inside and the cmdline baked in (the ABL appends nothing), so the deliverable is a
 # boot.img and the keepalive moves from install time to mint time. UPSTREAM_20261001.md.
-BOOTIMG="${BOOTIMG:-$([ "$BASEDATE" -ge 20261001 ] && echo 1 || echo 0)}"
+# BLS era (ROCKNIX 20261101+): /flash/KERNEL is the raw PE Image again, loaded by OpenABL
+# through the EFI stub; the cmdline and the DTB come from a Boot Loader Spec entry the kit
+# renders at deploy. The boot.img machinery has no object on this lane. UPSTREAM_20261101.md.
+BLS="${BLS:-$([ "$BASEDATE" -ge 20261101 ] && echo 1 || echo 0)}"
+BOOTIMG="${BOOTIMG:-$([ "$BASEDATE" -ge 20261001 ] && [ "$BLS" != 1 ] && echo 1 || echo 0)}"
+[ "$BLS" = 1 ] && [ "$BOOTIMG" = 1 ] && die "BLS=1 and BOOTIMG=1 are exclusive (one artifact format per lane)"
+# ETK_CMDLINE: the ONE record of what ETK adds to the stock cmdline. boot.img lane: baked into
+# the header at mint. BLS lane: NOT baked -- the kit renders it into the entry's options line at
+# deploy (gtk_stack.json cmdline_extra); the lane only records and gate-checks it.
 ETK_CMDLINE="${ETK_CMDLINE:-msm.context_keepalive=1 panic=30}"
 # Kit DTB splice at mint (ABL era: the DTBs ride inside the boot.img). ETK_KIT_DTB=0
 # mints a pure-parity image (no splice); ETK_INTERNAL_MIC=0 drops the mic delta only.
@@ -46,6 +62,11 @@ ETK_INTERNAL_MIC="${ETK_INTERNAL_MIC:-1}"
 # sdpoll delta: the SD host's cd-gpios becomes broken-cd, so the slot is polled and its
 # detect pin ignored. Default 0 = every certified mint, unchanged. Never a release kernel.
 ETK_SD_POLL="${ETK_SD_POLL:-0}"
+# BLS lane: the three kit-DTB knobs above are DEPLOY-TIME knobs now (install.sh / osguard derive
+# dtbs/etk/<model>.dtb from the OS's own /flash/dtbs at every deploy and heal, with the same
+# flags from etk.conf). A non-default value at mint would be silently meaningless, so it FAILS
+# the mint instead (step 1). The splicer is still staged: bls_gate.sh dry-runs it on both Flip 2
+# trees as the lane's early warning that it still fits the new DTS.
 # BOOT LOGO (ABL era, 2026-10-08): stock 20261001 ships CONFIG_TYPEC_MUX_GPIO_SBU=m and
 # the 20261001 DTS routes the USB-C connector's orientation/mode switch through that
 # gpio-sbu-mux (e4461cfea5 retired the phantom nb7vpq904m, which was =y). The connector
@@ -57,6 +78,10 @@ ETK_SD_POLL="${ETK_SD_POLL:-0}"
 # that commit as a CONFIG DELTA over the rig ground truth. The rig's ground truth stays
 # =m (it IS the rig); the drift log shows exactly this line. ETK_GPIO_SBU_BUILTIN=0 =
 # pure-parity mint (the A/B arm that reproduces the missing logo).
+# BLS lane: MOOT -- stock 20261101 ships CONFIG_TYPEC_MUX_GPIO_SBU=y (upstream 187eb24f2e is in
+# the tag), so parity already carries the fix; the knob is ignored, the drift must not show the
+# line, and the VERIFY step asserts the built-in from the BUILT config (groundtruth
+# config-diff-20261001-to-20261030.diff).
 ETK_GPIO_SBU_BUILTIN="${ETK_GPIO_SBU_BUILTIN:-1}"
 # FORENSICS (2026-10-11, ETK GT5 op -- etk-dossiers Hunt_GT5_20261011.md §8): GT5 freezes the
 # whole SoC and a firmware watchdog resets it ~6.5 s later (N=4), so Linux never logs a word and
@@ -81,6 +106,9 @@ if [ "$ETK_FORENSICS" = 1 ]; then
   ETK_CMDLINE="$ETK_CMDLINE msm.gpu_stall_on_fault=0 watchdog_thresh=2 sysctl.kernel.hardlockup_all_cpu_backtrace=1 sysctl.kernel.softlockup_all_cpu_backtrace=1 reserve_mem=2M:4096:etk_ramoops ramoops.mem_name=etk_ramoops ramoops.record_size=0x40000 ramoops.console_size=0x80000 ramoops.max_reason=2 efi_pstore.pstore_disable=1"
 fi
 REF_KERNEL="$STG/KERNEL.stock-$BASEDATE"
+# BLS lane: stage_72.sh records the stock modules dir name (SYSTEM squashfs) here when it had the
+# SYSTEM image; the gate asserts it equals kernel.release. Empty = not known offline, skip.
+STOCK_MODULES_DIR="${STOCK_MODULES_DIR:-$(cat "$STG/stock-modules-dir-$BASEDATE.txt" 2>/dev/null || true)}"
 
 # gcc-15 is the VALIDATED compiler (15.3.0 built every shipping artifact). Do not
 # default to gcc-14: it produces a kernel that compiles clean, verifies clean, and
@@ -133,6 +161,26 @@ if [ "$BOOTIMG" = 1 ]; then
     [ -f "$STG/etk_dtb_mic.py" ] || die "staging/etk_dtb_mic.py missing — lane_kernel.sh stages it from the node's ~/etk (ETK_KIT_DTB=0 for a pure-parity mint)"
     python3 -I "$STG/etk_dtb_mic.py" >/dev/null 2>&1 || [ $? = 2 ] || die "staging/etk_dtb_mic.py does not run"
   fi
+fi
+if [ "$BLS" = 1 ]; then
+  # the stock reference is the raw PE Image now: MZ at 0, ARMd at 0x38 -- NOT ANDROID!
+  [ -f "$REF_KERNEL" ] || die "staging/KERNEL.stock-$BASEDATE missing — the BLS lane gates the Image against the STOCK KERNEL (release token, vermagic): stage the image's /flash/KERNEL (stage_72.sh BASEDATE=$BASEDATE)"
+  if head -c 8 "$REF_KERNEL" | grep -q 'ANDROID!'; then
+    die "staging/KERNEL.stock-$BASEDATE is an Android boot.img (the 20261001 format) — BASEDATE=$BASEDATE is the BLS lane; stage the 20261101 raw PE KERNEL"
+  fi
+  { [ "$(head -c 2 "$REF_KERNEL")" = MZ ] && [ "$(dd if="$REF_KERNEL" bs=1 skip=56 count=4 2>/dev/null)" = ARMd ]; } \
+    || die "staging/KERNEL.stock-$BASEDATE is not a raw arm64 PE Image (MZ + ARMd@0x38)"
+  STOCK_DTBS="$STG/stock-dtbs-$BASEDATE"
+  [ -d "$STOCK_DTBS" ] && [ -n "$(ls "$STOCK_DTBS"/*.dtb 2>/dev/null)" ] \
+    || die "staging/stock-dtbs-$BASEDATE/ missing or empty — the image's /flash/dtbs/*.dtb (9 trees), the DTB parity reference (stage_72.sh)"
+  # mint-time kit knobs are RETIRED here: a non-default value means someone expects a spliced
+  # artifact, and this lane cannot deliver one -- fail loud, point at deploy time
+  [ "$ETK_KIT_DTB" = 1 ] && [ "$ETK_INTERNAL_MIC" = 1 ] && [ "$ETK_SD_POLL" = 0 ] \
+    || die "BLS lane: ETK_KIT_DTB/ETK_INTERNAL_MIC/ETK_SD_POLL have no mint-time meaning (got $ETK_KIT_DTB/$ETK_INTERNAL_MIC/$ETK_SD_POLL) — the kit DTB is derived on the rig at deploy from /flash/dtbs (install.sh / osguard, flags from etk.conf). Unset them."
+  [ "$ETK_GPIO_SBU_BUILTIN" = 1 ] || log "ETK_GPIO_SBU_BUILTIN=$ETK_GPIO_SBU_BUILTIN ignored on the BLS lane: stock ships CONFIG_TYPEC_MUX_GPIO_SBU=y, there is no delta to turn off"
+  [ -f "$STG/etk_dtb_mic.py" ] || die "staging/etk_dtb_mic.py missing — lane_kernel.sh stages it from the node's ~/etk; the BLS gate dry-runs it on both Flip 2 trees (no splice, early warning only)"
+  python3 -I "$STG/etk_dtb_mic.py" >/dev/null 2>&1 || [ $? = 2 ] || die "staging/etk_dtb_mic.py does not run"
+  [ -f /work/scripts/bls_gate.sh ] || die "/work/scripts/bls_gate.sh missing — pull ~/rocknix-gtk on the node"
 fi
 # ETK STACK SYNC (2026-10-11): 04-etk is re-derived from THIS repo's committed patches-7.2/ at every
 # build (the repo is /work), with stage_72.sh's own ABSORBED rule. Before this, a new ETK patch reached
@@ -217,6 +265,8 @@ if [ "$BOOTIMG" = 1 ] && [ "$ETK_GPIO_SBU_BUILTIN" = 1 ]; then
   "$SRC/scripts/config" --file "$OUT/.config" --enable CONFIG_TYPEC_MUX_GPIO_SBU
   SPLASH_FIX=1
   log "boot-logo fix: CONFIG_TYPEC_MUX_GPIO_SBU=y (upstream 187eb24f2e) -- expect it in the drift"
+elif [ "$BLS" = 1 ]; then
+  log "boot-logo fix: MOOT on the BLS lane -- stock $BASEDATE ships CONFIG_TYPEC_MUX_GPIO_SBU=y (upstream 187eb24f2e in the tag); no config delta, the drift must not show the line"
 else
   log "boot-logo fix: OFF (BOOTIMG=$BOOTIMG ETK_GPIO_SBU_BUILTIN=$ETK_GPIO_SBU_BUILTIN) -- stock =m, logo missing on 20261001 is EXPECTED"
 fi
@@ -268,13 +318,16 @@ cat /kernel/config72$SFX.drift
 #        DTB set = every staged device .dts, C-sorted: that IS stock's order ('-' < '.'
 #        puts each -visionox before its base board), the same qcom/<name>.dtb make
 #        targets ROCKNIX passes via get_kernel_make_extracmd.
+#        BLS lane: the DTBs are built for the PARITY GATE only (9/9 byte-identical to the
+#        image's /flash/dtbs); the OS ships them, the artifact is the Image alone.
 DTB_TARGETS=""
-if [ "$BOOTIMG" = 1 ]; then
+if [ "$BOOTIMG" = 1 ] || [ "$BLS" = 1 ]; then
   for f in $(cd $STG/dts-device-$BASEDATE/qcom && LC_ALL=C ls *.dts); do
     DTB_TARGETS="$DTB_TARGETS qcom/${f%.dts}.dtb"
   done
   [ -n "$DTB_TARGETS" ] || die "no .dts in staging/dts-device-$BASEDATE/qcom"
-  log "boot.img lane: DTBs (stock order):$DTB_TARGETS"
+  [ "$BOOTIMG" = 1 ] && log "boot.img lane: DTBs (stock order):$DTB_TARGETS"
+  [ "$BLS" = 1 ] && log "BLS lane: DTBs built for the parity gate only:$DTB_TARGETS"
 fi
 log "building Image + modules${DTB_TARGETS:+ + dtbs} with $($KCC --version | head -1) ..."
 # DTC_FLAGS=-@ : ROCKNIX's linux package.mk builds every DTB with symbols
@@ -330,6 +383,15 @@ if [ "$SPLASH_FIX" = 1 ]; then
   grep -q 'gpio-sbu-mux' "$OUT/modules.builtin" \
     || die "boot-logo fix requested but modules.builtin does not list gpio-sbu-mux"
   echo "boot-logo fix (gpio-sbu-mux built-in, upstream 187eb24f2e): PRESENT"
+elif [ "$BLS" = 1 ]; then
+  # parity carries it: assert from the BUILT config and the ground truth, not from a knob
+  grep -q '^CONFIG_TYPEC_MUX_GPIO_SBU=y$' $CFG_GT \
+    || die "BLS lane expects stock CONFIG_TYPEC_MUX_GPIO_SBU=y in the ground truth (it is =y in 20261101); re-read the config carve"
+  grep -q '^CONFIG_TYPEC_MUX_GPIO_SBU=y$' "$OUT/.config" \
+    || die "CONFIG_TYPEC_MUX_GPIO_SBU is not =y in the built config although the ground truth has it (olddefconfig dropped it?)"
+  grep -q 'gpio-sbu-mux' "$OUT/modules.builtin" \
+    || die "modules.builtin does not list gpio-sbu-mux although the config says =y"
+  echo "boot-logo fix (gpio-sbu-mux built-in): STOCK PARITY -- 20261101 ships it =y, no ETK delta"
 else
   echo "boot-logo fix: OFF -- stock CONFIG_TYPEC_MUX_GPIO_SBU=m (pure parity)"
 fi
@@ -368,4 +430,24 @@ if [ "$BOOTIMG" = 1 ]; then
   grep -q "msm.context_keepalive=1" <(python3 -I /work/scripts/bootimg_parity.py show "$OUT/arch/arm64/boot/boot.img") \
     || die "boot.img cmdline lacks msm.context_keepalive=1 — the anti-lock would be lost silently"
   echo "boot.img: $OUT/arch/arm64/boot/boot.img (cmdline + '$ETK_CMDLINE')"
+fi
+
+# --- 9. BLS gate (20261101+ lane only) — the raw Image IS the artifact; prove it fits the OS
+#        bls_gate.sh: PE magic + release == kernel.release == stock's, vermagic == stock's
+#        (the stock modules dir is named after it), built DTBs 9/9 byte-identical to the
+#        image's /flash/dtbs, the kit splicer dry-runs on both Flip 2 trees (DTB_MIC_PATCHED;
+#        the artifact set itself stays stock), drift surfaced with the retired GPIO_SBU knob
+#        asserted gone and CONFIG_CMDLINE asserted empty (one cmdline source: the entry).
+if [ "$BLS" = 1 ]; then
+  echo "=== BLS GATE (OpenABL + Boot Loader Spec) ==="
+  echo "cmdline_extra (deploy-time; the kit renders it into loader/entries/etk-gtk.conf options, NOT baked here): '$ETK_CMDLINE'"
+  printf '%s\n' "$ETK_CMDLINE" > "/kernel/cmdline_extra$SFX.txt"
+  bash /work/scripts/bls_gate.sh \
+      --image "$OUT/arch/arm64/boot/Image" --release "$OUT/include/config/kernel.release" \
+      --stock "$REF_KERNEL" --stock-dtbs "$STOCK_DTBS" --built-dtbs "$OUT/arch/arm64/boot/dts/qcom" \
+      --splicer "$STG/etk_dtb_mic.py" --modules-out "$OUT" --config "$OUT/.config" \
+      --drift "/kernel/config72$SFX.drift" --cmdline-extra "$ETK_CMDLINE" \
+      ${STOCK_MODULES_DIR:+--modules-dir "$STOCK_MODULES_DIR"} \
+    || die "BLS gate FAILED — nothing to ship"
+  echo "Image: $OUT/arch/arm64/boot/Image (the artifact; lane_kernel.sh ships it as KERNEL.rocknix-gtk-$BASEDATE-<ver>)"
 fi
