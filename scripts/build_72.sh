@@ -17,8 +17,9 @@
 #                                    under /flash/dtbs, both rendered at DEPLOY by the kit).
 #                                    No pack; scripts/bls_gate.sh is the parity proof.
 # LAW: gate every stage on real exit codes; never pipe make to tail.
-# LAW: build in the sid container (gcc 15.x / binutils >=2.44) — gcc-14
-#      black-screens pre-userspace on this target (proven 2026-07-05).
+# LAW: build in the sid container with STOCK's compiler major (scripts/stock_gcc.sh reads it
+#      from the ground-truth config: gcc-15 through 20261001, gcc-16 from 20261101) and
+#      binutils >=2.44 — gcc-14 black-screens pre-userspace on this target (proven 2026-07-05).
 # LAW: staging inputs are GROUND TRUTH from the post-update rig (config.gz,
 #      carved initramfs, firmware blobs) — never repo-derived approximations.
 set -u
@@ -110,21 +111,6 @@ REF_KERNEL="$STG/KERNEL.stock-$BASEDATE"
 # SYSTEM image; the gate asserts it equals kernel.release. Empty = not known offline, skip.
 STOCK_MODULES_DIR="${STOCK_MODULES_DIR:-$(cat "$STG/stock-modules-dir-$BASEDATE.txt" 2>/dev/null || true)}"
 
-# gcc-15 is the VALIDATED compiler (15.3.0 built every shipping artifact). Do not
-# default to gcc-14: it produces a kernel that compiles clean, verifies clean, and
-# black-screens the rig pre-userspace (BUILDING.md "Toolchain law"). Do not default
-# to the container's bare `gcc` either — sid's default moved to 16.1.0 on 2026-08-05
-# and is unvalidated here. Override deliberately or not at all.
-KCC_EXPLICIT="${KCC:+yes}"
-KCC="${KCC:-gcc-15}"
-if [ -z "$KCC_EXPLICIT" ]; then
-  KCC_VER="$($KCC -dumpfullversion 2>/dev/null || echo none)"
-  case "$KCC_VER" in
-    15.*) ;;
-    *) die "default compiler $KCC is $KCC_VER, not the validated 15.x. Install gcc-15 in the container, or set KCC=... deliberately." ;;
-  esac
-fi
-
 # --- 0. Staging inputs exist? Fail LOUDLY with the step that produces each.
 #        (The 20260901 groundtruth refresh happens AFTER the rig is migrated —
 #        UPSTREAM_20260901.md "K1 execution order".)
@@ -146,6 +132,23 @@ fi
 # FIRMWARE references the nested relative paths, so the tree must stay nested.
 FWCOUNT=$(find $STG/external-firmware-$BASEDATE -type f | wc -l)
 [ "$FWCOUNT" -ge 8 ] || die "external-firmware-$BASEDATE has $FWCOUNT files, expected >=8 (regulatory.db + .p7s are NEW in 20260901 — CONFIG_EXTRA_FIRMWARE includes them when CONFIG_CFG80211=y)"
+
+# --- 0b. THE TOOLCHAIN LAW, read from stock (scripts/stock_gcc.sh; operator decision 2026-10-31):
+#         the compiler major is the one the stock kernel was built with, taken from the ground-
+#         truth config's CONFIG_GCC_VERSION -- gcc-15 on 20260901/20261001, gcc-16 on 20261101+.
+#         gcc-14 black-screened the rig pre-userspace after a clean verify (BUILDING.md); the
+#         container's bare `gcc` is never used by default (sid moves). An explicit KCC= is a
+#         deliberate, logged override and skips the parity check; otherwise a major mismatch
+#         between the resolved compiler and stock fails the mint BEFORE the build.
+KCC_EXPLICIT="${KCC:+yes}"
+if [ -z "$KCC_EXPLICIT" ]; then
+  KCC=$(bash /work/scripts/stock_gcc.sh "$CFG_GT") || die "could not read stock's compiler major from $CFG_GT (stock_gcc.sh)"
+  command -v "$KCC" >/dev/null || die "stock $BASEDATE is built with $KCC but the container has none -- re-run provision-build-container.sh (it installs gcc-15 and gcc-16 side by side)"
+  bash /work/scripts/stock_gcc.sh "$CFG_GT" --check "$KCC" || die "toolchain parity check failed"
+  log "toolchain: $KCC ($($KCC -dumpfullversion)) = stock's compiler major (CONFIG_GCC_VERSION $(sed -n 's/^CONFIG_GCC_VERSION=//p' "$CFG_GT")), parity law"
+else
+  log "toolchain: KCC=$KCC EXPLICIT -- stock's is $(bash /work/scripts/stock_gcc.sh "$CFG_GT" 2>/dev/null || echo unknown) ($(sed -n 's/^CONFIG_CC_VERSION_TEXT=//p' "$CFG_GT")); a deliberate override, cold-boot gated, parity check skipped"
+fi
 
 # --- 1. Extract pristine tarball — fresh whenever the staged patch set changed.
 #        The tree persists in the container volume; the stamp used to be a bare

@@ -22,13 +22,15 @@ against nightly-20261030, re-check at the tag; offline ground truth in `groundtr
    (container `rocknix-gtk-kernel-sid`, tree `~/rocknix-gtk` on the node). Law #8 naming:
    `KERNEL.rocknix-gtk-<8-digit-date>-<ver>` (knobs `FORGE_KERNEL_DATE`/`FORGE_KERNEL_VER`).
    Config drift vs groundtruth is SURFACED in the lane log — read it, don't skip it.
-2. **THE GCC-15 LAW**: kernels build with `gcc-15` (enforced in-recipe; sid's default moved to
-   16). The failure mode of a wrong toolchain is a **silent pre-userspace black screen** — clean
-   build, clean verify, dead rig. Never relax this to "whatever the container has".
-   **20261101 note:** stock ROCKNIX is built with gcc 16.2.0 from that release on; the law's
-   reason was parity with stock, its letter says 15. Which to follow for the 0.7.0 mint is the
-   OPERATOR's decision (`UPSTREAM_20261101.md` §5 lays out the inputs); until decided, the
-   recipe keeps `gcc-15` and a `KCC=gcc-16` override is a deliberate, cold-boot-gated choice.
+2. **THE TOOLCHAIN LAW = parity with stock's compiler major** (operator decision 2026-10-31;
+   was "THE GCC-15 LAW"). The recipe reads `CONFIG_GCC_VERSION` out of the ground-truth config
+   (`scripts/stock_gcc.sh`) and builds with that major: **gcc-15 for 20260901/20261001, gcc-16
+   for 20261101+** (stock is 16.2.0 there). The failure mode of a wrong toolchain is a **silent
+   pre-userspace black screen** — clean build, clean verify, dead rig (gcc-14, 2026-07-05).
+   Never relax this to "whatever the container has" (sid's bare `gcc` is never the default);
+   an explicit `KCC=`/`FORGE_KCC=` is a deliberate, logged, cold-boot-gated override. The first
+   gcc-16 kernel is UNVALIDATED until a car cold-boots it (`UPSTREAM_20261101.md` §5 names the
+   falsifier); the container needs `gcc-16` installed (`provision-build-container.sh`).
 3. **Deploy**: only the operator, only via `~/etk/install.sh` (STEP 6.4: grub twin entries,
    `/flash/KERNEL.gtktest` + pristine `KERNEL.etk-stock` fallback; knobs `KERNEL_IMAGE`,
    `KERNEL_CONTEXT_KEEPALIVE`, `KERNEL_DEPLOY_MODE`; 20261001: the ABL slot; 20261101+: a

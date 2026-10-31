@@ -38,11 +38,14 @@ VOLUME="${VOLUME:-rocknix-gtk-kernel-build}"
 REPO_DIR="${REPO_DIR:-}"
 
 # The dep set is not guessed — it is dpkg-query from the container that has been
-# producing shipped kernels. gcc-15 rides alongside sid's default compiler; the
-# build scripts pin CC to it deliberately (see the toolchain law in BUILDING.md).
+# producing shipped kernels. gcc-15 and gcc-16 ride alongside sid's default compiler;
+# the build scripts pick the one matching STOCK's major (the toolchain law, BUILDING.md).
 # mkbootimg: the qcom-abl boot.img lane (K2, 20261001+) packs the Android v0 image
 # the ROCKNIX ABL boots (scripts/pack_bootimg.sh); added 2026-10-08.
-PKGS="bc bison build-essential cpio flex gcc-15 kmod libelf-dev libssl-dev
+# gcc-16 (2026-10-31): stock ROCKNIX 20261101 is built with gcc 16.2.0 and the toolchain law
+# is parity with stock's major (scripts/stock_gcc.sh), so both compilers ride side by side:
+# gcc-15 remints the 20260901/20261001 lanes, gcc-16 builds 20261101+. Neither is `gcc`.
+PKGS="bc bison build-essential cpio flex gcc-15 gcc-16 kmod libelf-dev libssl-dev
       mkbootimg python3 rsync xz-utils"
 PKGS="$(printf '%s' "$PKGS" | tr -s '[:space:]' ' ')"
 
@@ -124,6 +127,7 @@ docker exec "${CONTAINER}" bash -lc '
 echo ">> Toolchain in ${CONTAINER}:"
 docker exec "${CONTAINER}" bash -lc '
   printf "     %-10s %s\n" gcc-15 "\$(gcc-15 -dumpfullversion 2>/dev/null)"
+  printf "     %-10s %s\n" gcc-16 "\$(gcc-16 -dumpfullversion 2>/dev/null)   (stock 20261101 = 16.2.0; the recipe demands the same major)"
   printf "     %-10s %s\n" binutils "\$(ld --version | head -1 | awk "{print \\\$NF}")"
   printf "     %-10s %s\n" default-gcc "\$(gcc -dumpfullversion 2>/dev/null)"
 '

@@ -37,7 +37,7 @@ done
 
 TD=$(mktemp -d); [ -n "${KEEP:-}" ] || trap 'rm -rf "$TD"' EXIT; [ -n "${KEEP:-}" ] && echo "sandbox: $TD"
 mkdir -p "$TD/scripts"
-for f in bls_gate.sh ikconfig.py extract_initramfs.py stage_72.sh; do
+for f in bls_gate.sh ikconfig.py extract_initramfs.py stage_72.sh stock_gcc.sh; do
     if [ -n "$REV" ]; then git show "$REV:scripts/$f" > "$TD/scripts/$f" 2>/dev/null || rm -f "$TD/scripts/$f"
     else cp "scripts/$f" "$TD/scripts/$f"; fi
 done
@@ -77,8 +77,19 @@ cmp -s "$TD/abl.cpio" groundtruth/initramfs-stock-20261001.cpio \
     && ok "carve: extract_initramfs.py on the 20261001 boot.img == initramfs-stock-20261001.cpio (one carver, both formats)" \
     || bad "carve: extract_initramfs.py on the 20261001 boot.img differs"
 
-# --- the gate accepts the real stock set ("built" == stock: the stock KERNEL plays the Image) --
 printf 'CONFIG_CMDLINE=""\n' > "$TD/good.config"
+# --- the toolchain law reads itself out of stock (stock_gcc.sh) ---------------------------
+SG="$TD/scripts/stock_gcc.sh"
+sg() { [ -f "$SG" ] || { echo "no stock_gcc.sh at this revision"; return 99; }; bash "$SG" "$@"; }
+expect "toolchain: 20261001 stock config -> gcc-15"                         0 "gcc-15" sg groundtruth/config-7.2-rig-20261001.txt
+expect "toolchain: 20261101 (nightly-20261030) stock config -> gcc-16"      0 "gcc-16" sg "$GT/config-7.2-rig-20261030.txt"
+printf '#!/bin/sh\necho 16.2.0\n' > "$TD/fake-gcc-16"; printf '#!/bin/sh\necho 15.3.0\n' > "$TD/fake-gcc-15"; chmod +x "$TD/fake-gcc-16" "$TD/fake-gcc-15"
+expect "toolchain: --check passes a gcc of stock's major"                   0 "parity holds" sg "$GT/config-7.2-rig-20261030.txt" --check "$TD/fake-gcc-16"
+expect "toolchain: --check FAILS a gcc-15 against gcc-16 stock"             1 "parity BROKEN" sg "$GT/config-7.2-rig-20261030.txt" --check "$TD/fake-gcc-15"
+expect "toolchain: --check FAILS a gcc-16 against gcc-15 stock (20261001 remints stay on 15)" 1 "parity BROKEN" sg groundtruth/config-7.2-rig-20261001.txt --check "$TD/fake-gcc-16"
+expect "toolchain: a config without CONFIG_GCC_VERSION is rc 2"             2 "no CONFIG_GCC_VERSION" sg "$TD/good.config"
+
+# --- the gate accepts the real stock set ("built" == stock: the stock KERNEL plays the Image) --
 : > "$TD/empty.drift"
 printf '2c2\n< CONFIG_INITRAMFS_SOURCE="/x"\n---\n> CONFIG_INITRAMFS_SOURCE="/y"\n5c5\n< CONFIG_CC_VERSION_TEXT="gcc 16"\n---\n> CONFIG_CC_VERSION_TEXT="gcc 15"\n' > "$TD/tool.drift"
 expect "gate: stock PE set passes (release 7.2.0, 9/9 DTBs, splicer dry-run PATCHED)" 0 "BLS GATE OK" \

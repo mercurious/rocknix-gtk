@@ -7,26 +7,37 @@ builds only the kernel image, then it overlays via ETK.
 
 ## Toolchain law (learned the hard way)
 
-**Build with GCC ≥ 15 and binutils ≥ 2.44.** A GCC-14 / binutils-2.42 build compiles and
-verifies clean (correct vermagic, 236/236 modules, byte-identical initramfs) yet
-**black-screens the rig pre-userspace** — no console, no ssh, nothing readable. A GCC-15.x /
-binutils-2.46 build of the identical tree boots first try and lands at the exact stock image
-byte size. The kernel is boot-sensitive to the toolchain; don't fight it. (Debian `sid`'s
-`build-essential` satisfies this; Ubuntu `noble`'s GCC-14 does not.)
+**Build with the compiler major STOCK was built with, and binutils ≥ 2.44.** A GCC-14 /
+binutils-2.42 build compiles and verifies clean (correct vermagic, 236/236 modules, byte-identical
+initramfs) yet **black-screens the rig pre-userspace** — no console, no ssh, nothing readable. A
+GCC-15.x / binutils-2.46 build of the identical tree boots first try and lands at the exact stock
+image byte size. Stock was GCC 15 at the time. The kernel is boot-sensitive to the toolchain;
+don't fight it, match it.
 
-**Pin the compiler explicitly — `sid` moves.** As of 2026-08-05 sid's default `gcc` is
-**16.1.0** (binutils 2.47), while every validated artifact to date was built with
-**GCC 15.3.0 / binutils 2.46.50**. GCC 16 is untested here, and the failure mode above is
-silent (clean build, clean verification, black screen), so do not let a container's default
-compiler decide. Install `gcc-15` alongside and pass it in:
+**The law reads itself out of the ground truth (2026-10-31).** `scripts/stock_gcc.sh <config>`
+prints `gcc-<major>` from the stock config's `CONFIG_GCC_VERSION` (carved from the stock KERNEL's
+own IKCONFIG by `scripts/ikconfig.py`), and `build_72.sh` builds with exactly that unless `KCC=`
+is set explicitly — then it checks `$KCC -dumpfullversion` has that major and fails the mint
+BEFORE the build if not:
+
+| chassis | stock compiler (`CONFIG_CC_VERSION_TEXT`) | recipe picks | validated |
+|---|---|---|---|
+| 20260801 / 20260901 / 20261001 | gcc 15.2.0 | `gcc-15` (sid 15.3.0) | cold-booted, every shipped artifact |
+| 20261101+ | gcc 16.2.0, binutils 2.47.20260726 | `gcc-16` (sid) | **not yet** — the 0.7.0 cold boot is the gate |
+
+Operator decision 2026-10-31 (`UPSTREAM_20261101.md` §5): parity over the letter. The old law said
+"gcc-15"; its reason was "match stock", and stock moved. **Pin the compiler explicitly — `sid`
+moves** (its bare `gcc` was 16.1.0 on 2026-08-05 and is never the default here). Install both
+alongside and let the recipe pick:
 
 ```
-apt-get install -y build-essential gcc-15   # sid keeps 15.x available next to the default
-make -C linux-7.1.2 O=out ARCH=arm64 CC=gcc-15 HOSTCC=gcc-15 ...
+apt-get install -y build-essential gcc-15 gcc-16   # provision-build-container.sh does this
+make -C linux-7.2 O=out ARCH=arm64 CC=$(scripts/stock_gcc.sh staging/config-7.2-rig-<date>.txt) HOSTCC=... 
 ```
 
-A kernel built with any other toolchain combination is unvalidated by definition and must
-clear the §7 cold-boot gate before it is trusted — no exceptions, however clean the verify.
+A kernel built with any other toolchain combination is unvalidated by definition and must clear
+the §7 cold-boot gate before it is trusted — no exceptions, however clean the verify. That
+includes the FIRST gcc-16 kernel: a clean `bls_gate.sh` proves format and parity, never boot.
 
 ## 1. Reconstruct the base tree
 
