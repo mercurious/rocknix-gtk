@@ -97,6 +97,8 @@ expect "gate: stock PE set passes (release 7.2.0, 9/9 DTBs, splicer dry-run PATC
 expect "gate: both Flip 2 trees derive and report DTB_MIC_PATCHED"  0 "sm8250-retroidpocket-flip2-visionox.dtb: derived tree reports DTB_MIC_PATCHED" gate "$PE" 7.2.0 "$PE" "$DTBS" "$DTBS"
 expect "gate: paths + toolchain drift is classified as expected"     0 "drift is paths + toolchain probes only" gate "$PE" 7.2.0 "$PE" "$DTBS" "$DTBS" --drift "$TD/tool.drift"
 printf '7.2.0\n' > "$TD/kernel.release"
+printf '5c5\n< CONFIG_CC_VERSION_TEXT="aarch64-rocknix-linux-gnu-gcc-16.2.0 (GCC) 16.2.0"\n---\n> CONFIG_CC_VERSION_TEXT="gcc-16 (Debian 16.2.0-4) 16.2.0"\n10c10\n< CONFIG_AS_VERSION=20285426\n---\n> CONFIG_AS_VERSION=24750\n885d884\n< # CONFIG_GCC_PLUGINS is not set\n8061d8059\n< CONFIG_OPENSSL_SUPPORTS_ML_DSA=y\n' > "$TD/debian.drift"
+expect "gate: the real 0.6.9 drift (Debian gcc-16: vendor string, binutils, GCC_PLUGINS hidden, host OpenSSL) is toolchain-only" 0 "drift is paths + toolchain probes only" gate "$PE" 7.2.0 "$PE" "$DTBS" "$DTBS" --drift "$TD/debian.drift"
 expect "gate: --release accepts the kernel.release FILE"             0 "BLS GATE OK" gate "$PE" "$TD/kernel.release" "$PE" "$DTBS" "$DTBS"
 
 # --- and refuses each defect -------------------------------------------------------------

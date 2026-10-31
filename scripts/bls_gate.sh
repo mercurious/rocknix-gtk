@@ -171,7 +171,10 @@ if [ -n "$DRIFT" ]; then
     echo "[bls_gate] ---- end drift ----"
     if grep -q 'CONFIG_TYPEC_MUX_GPIO_SBU' "$DRIFT"; then bad "(e) drift touches CONFIG_TYPEC_MUX_GPIO_SBU — stock 20261101 ships =y, the ETK_GPIO_SBU_BUILTIN delta is retired and must be GONE"
     else ok "(e) drift has no TYPEC_MUX_GPIO_SBU line (retired knob gone)"; fi
-    REVIEW=$(grep '^[<>]' "$DRIFT" | grep -vE 'CONFIG_(INITRAMFS_SOURCE|EXTRA_FIRMWARE_DIR|CC_VERSION_TEXT|GCC_VERSION|AS_VERSION|LD_VERSION|LLD_VERSION|CLANG_VERSION|RUSTC[A-Z_]*|PAHOLE_VERSION|CC_HAS_[A-Z0-9_]+|CC_CAN_[A-Z0-9_]+|AS_HAS_[A-Z0-9_]+|AS_IS_[A-Z]+|LD_IS_[A-Z]+|LD_CAN_[A-Z0-9_]+|TOOLS_SUPPORT_RELR|CC_IS_[A-Z]+|CC_IMPLICIT_FALLTHROUGH|CC_NO_[A-Z0-9_]+)' || true)
+    # toolchain/host probes: compiler + binutils versions and capability probes, GCC_PLUGINS (hidden
+    # when the host gcc lacks plugin headers -- Debian gcc-16, 2026-10-31 -- and off in stock anyway),
+    # OPENSSL_SUPPORTS_* (the host OpenSSL; module signing is off)
+    REVIEW=$(grep '^[<>]' "$DRIFT" | grep -vE 'CONFIG_(INITRAMFS_SOURCE|EXTRA_FIRMWARE_DIR|CC_VERSION_TEXT|GCC_VERSION|AS_VERSION|LD_VERSION|LLD_VERSION|CLANG_VERSION|RUSTC[A-Z_]*|PAHOLE_VERSION|CC_HAS_[A-Z0-9_]+|CC_CAN_[A-Z0-9_]+|AS_HAS_[A-Z0-9_]+|AS_IS_[A-Z]+|LD_IS_[A-Z]+|LD_CAN_[A-Z0-9_]+|TOOLS_SUPPORT_RELR|CC_IS_[A-Z]+|CC_IMPLICIT_FALLTHROUGH|CC_NO_[A-Z0-9_]+|GCC_PLUGINS|HAVE_GCC_PLUGINS|OPENSSL_SUPPORTS_[A-Z0-9_]+)' || true)
     if [ -n "$REVIEW" ]; then
       echo "[bls_gate] drift lines beyond paths + toolchain probes (REVIEW — expected only for a FORENSICS mint; the MODULE-ABI guard in build_72.sh already vetted the struct-layout symbols):"
       printf '%s\n' "$REVIEW" | sed 's/^/[bls_gate]   /'

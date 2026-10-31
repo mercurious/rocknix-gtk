@@ -322,3 +322,25 @@ USB-C ↔ USB-C cable to the M1:
    with Pitlink attached.
 5. A wall charger (DCP) and the A-to-C path still charge as before (`usb_type` DCP / SDP).
 Falsifier: ICL_STATUS stays `0a`, or VBUS collapses (the M1 port cutting out) under load.
+
+## 20261101 BLS lane — first mint, `KERNEL.rocknix-gtk-20261030-0.6.9` (2026-10-31, REHEARSAL on the nightly)
+- Built on **etk-local, Linux shape** (the M1 Max under Asahi Fedora: rootless podman behind a
+  `docker` shim, 10 cores / 62 GB, 16K-page host) in ~4 min wall, `./forge.sh --local -v kernel`
+  with `FORGE_KERNEL_BASEDATE=20261030 FORGE_KERNEL_BLS=1`. Base = nightly-20261030
+  (`next@611338d0d`), the stand-in for the untagged 20261101; ground truth = the banked §1a set.
+- **First gcc-16 kernel of this fork**: the parity law picked `gcc-16` (Debian 16.2.0-4) from the
+  staged config's `CONFIG_GCC_VERSION=160200`; binutils 2.47.50. Stock is gcc 16.2.0 / 2.47.20260726.
+- All 66 patches applied (3 + 12 + 43 upstream, 8 ETK; #9 absorbed). 268 modules (= stock's dir).
+- `bls_gate.sh` **16/16 PASS**: PE Image, release 7.2.0 == stock, vermagic byte-equal to stock
+  (and to the built `zsmalloc.ko`), DTBs 9/9 byte-identical to the image's, splicer dry-run on both
+  Flip 2 trees → `DTB_MIC_PATCHED` with the artifact set STOCK, `CONFIG_CMDLINE=""`, keepalive in
+  the cmdline_extra record. Drift = 12 changed lines: paths, `CC_VERSION_TEXT` (vendor string
+  only), `AS/LD_VERSION`, `GCC_PLUGINS` hidden (Debian's gcc-16 has no plugin headers; off in
+  stock anyway), `OPENSSL_SUPPORTS_ML_DSA` (host OpenSSL). `GCC_VERSION` NOT in the drift.
+- Artifact **59,986,432 B — exactly the stock KERNEL's size**, sha `fd9e107d963d47a3…`, `MZ`.
+  Five compiler warnings in the build log, all inside upstream ROCKNIX patches (ath11k mac,
+  adc-keys, spmi-haptics, pmic_typec_pdphy), none in `patches-7.2/`.
+- **UNVALIDATED.** No car runs 20261101 yet; this artifact is dated 20261030 and is a rehearsal of
+  the lane, not a release candidate. The §7 cold-boot gate (a 20261101 car, OpenABL, the kit's
+  `etk-gtk.conf` entry) is what passes a gcc-16 kernel; nothing here does. Falsifier on record:
+  a dark first boot where the gcc-16 stock kernel boots the same OpenABL.
