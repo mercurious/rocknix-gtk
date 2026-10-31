@@ -3,7 +3,9 @@
 # provision-build-container.sh
 #
 # Create the `rocknix-gtk-kernel-sid` kernel build container on any arm64 Linux
-# Docker host — the laptop's colima VM, or a remote box like etk-cloud.
+# Docker host — a remote box like etk-cloud, the etk-local Lima VM, or a Linux host
+# running rootless podman behind a `docker` shim (the Asahi M1 Max, 2026-10-31:
+# etk tools/forge/local_node.sh writes the shim; the recipe is docker-verb only).
 #
 # WHY THIS EXISTS: until 2026-08-05 the container's exact dependency set lived
 # only inside the containers themselves. BUILDING.md documented one line of it
@@ -88,9 +90,11 @@ else
   docker pull -q "${IMAGE}" >/dev/null
   # /kernel is a VOLUME, not a bind mount: the build writes multi-GB trees and
   # logs, and they must not land in the repo checkout.
+  # :z on the bind mount: on an SELinux-enforcing host (the Asahi Fedora M1 Max node, podman)
+  # the container cannot read /work without a shared label; docker on Ubuntu ignores it.
   docker run -d --name "${CONTAINER}" \
     -v "${VOLUME}":/kernel \
-    -v "${REPO_DIR}":/work \
+    -v "${REPO_DIR}":/work:z \
     -w /kernel "${IMAGE}" sleep infinity >/dev/null
 fi
 
