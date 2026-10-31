@@ -13,6 +13,9 @@ For the 20260901 chassis lane: `UPSTREAM_20260901.md` (K1 prep — upstream delt
 20260801, surveyed 2026-08-21, with the release-day execution order).
 For the 20261001 lane: `UPSTREAM_20261001.md` (K2 prep — SM8250 moved GRUB → `qcom-abl`;
 the GTK kernel becomes a boot.img; surveyed 2026-09-26).
+For the 20261101 lane (ETK 0.11.0): `UPSTREAM_20261101.md` (SM8250 moved `qcom-abl` → `arm-efi` +
+OpenABL + Boot Loader Spec entries; the artifact is the raw PE `Image` again; read 2026-10-30
+against nightly-20261030, re-check at the tag; offline ground truth in `groundtruth/nightly-20261030/`).
 
 ## How artifacts flow (never deviate)
 1. **Mint**: `~/etk/forge.sh kernel` conducts `~/etk/tools/forge/lane_kernel.sh` on **etk-cloud**
