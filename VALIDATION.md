@@ -344,3 +344,7 @@ Falsifier: ICL_STATUS stays `0a`, or VBUS collapses (the M1 port cutting out) un
   the lane, not a release candidate. The §7 cold-boot gate (a 20261101 car, OpenABL, the kit's
   `etk-gtk.conf` entry) is what passes a gcc-16 kernel; nothing here does. Falsifier on record:
   a dark first boot where the gcc-16 stock kernel boots the same OpenABL.
+
+## KERNEL.rocknix-gtk-20261101-0.7.0 (ETK 0.11.0, certified, 2026-11-01)
+
+Minted on etk-local from the tag's ground truth (`96e0cab5…` stock KERNEL, sha `cc1e654b…`, 59,986,432 B = stock's size, gcc-16 16.2.0, gcc parity law). `tools/boot_slot.sh verify` 19/19 on car12 on the installed kit (artifact matched, 50 modules, no vermagic or symbol errors). The same kernel booted from the 20261101 GTK card image (card labels, mic S16, nine Turnip drivers). Its rehearsal build 0.6.9 carried a clean GT5P lap and a keepalive rescue on this OS.
